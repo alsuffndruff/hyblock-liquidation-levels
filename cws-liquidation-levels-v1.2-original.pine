@@ -1,0 +1,161 @@
+//@version=6
+indicator("CWS Liquidation Levels - Free v1.2", overlay = true, max_lines_count = 350, max_labels_count = 350)
+// Based on the user's Free v1: positive OI delta + close-to-close direction.
+// Target: BINANCE:BTCUSDT.P, standard 15-minute chart.
+// Experimental estimates, NOT actual liquidation orders or trader positions.
+// The script owns only its own lines/labels/table. No boxes or manual drawings.
+string oiSymbol = input.symbol("BINANCE:BTCUSDT.P_OI", "Binance Open Interest symbol", group = "OI")
+string oiUnit = input.string("BTC", "OI feed unit", options = ["BTC", "USD"], group = "OI", tooltip = "Verify the feed unit. BTC: delta x BTC per unit x BTC price. USD: delta directly.")
+float btcPerUnit = input.float(1.0, "BTC per OI unit (BTC mode)", minval = 0.00000001, group = "OI")
+float minUsdM = input.float(5.0, "Minimum estimated OI increase (million USD)", minval = 0.1, step = 0.5, group = "OI")
+float minGapUsd = input.float(50.0, "Minimum level spacing (USD)", minval = 0.0, step = 1.0, group = "Levels", tooltip = "Only compares active levels of the SAME side and leverage class. 0 disables deduplication. Duplicates are skipped, not summed.")
+float maxDistance = input.float(15.0, "Maximum distance from price (%)", minval = 0.1, maxval = 100.0, group = "Levels")
+int maxLevels = input.int(100, "Maximum active levels (all classes combined)", minval = 10, maxval = 350, group = "Levels")
+bool showLabels = input.bool(true, "Show OI / leverage labels", group = "Levels")
+int levHigh = input.int(100, "High leverage", minval = 2, group = "Leverage / lifetime")
+int levMedium = input.int(50, "Medium leverage", minval = 2, group = "Leverage / lifetime")
+int levLow = input.int(25, "Low leverage", minval = 2, group = "Leverage / lifetime")
+int daysHigh = input.int(60, "High leverage lifetime (days)", minval = 1, maxval = 3650, group = "Leverage / lifetime")
+int daysMedium = input.int(14, "Medium leverage lifetime (days)", minval = 1, maxval = 3650, group = "Leverage / lifetime")
+int daysLow = input.int(14, "Low leverage lifetime (days)", minval = 1, maxval = 3650, group = "Leverage / lifetime")
+bool showHigh = input.bool(true, "Show high leverage", group = "Leverage / lifetime")
+bool showMedium = input.bool(true, "Show medium leverage", group = "Leverage / lifetime")
+bool showLow = input.bool(true, "Show low leverage", group = "Leverage / lifetime")
+bool diagnostic = input.bool(false, "Diagnostic mode", group = "Diagnostics")
+// Six distinct fixed colors: Long H/M/L = lime/aqua/blue;
+// Short H/M/L = red/orange/yellow. Classes remain distinct even if leverage inputs match.
+color longHighColor = color.rgb(0, 230, 118)
+color longMediumColor = color.rgb(0, 188, 212)
+color longLowColor = color.rgb(41, 98, 255)
+color shortHighColor = color.rgb(255, 23, 68)
+color shortMediumColor = color.rgb(255, 145, 0)
+color shortLowColor = color.rgb(255, 234, 0)
+// A single record prevents parallel arrays from becoming misaligned.
+type Level
+    line ln
+    label lb
+    float price
+    int birthBar
+    int birthTime
+    int lifetimeMs
+    bool longSide
+    int classId
+var array<Level> levels = array.new<Level>()
+removeLevel(int index) =>
+    Level old = array.remove(levels, index)
+    line.delete(old.ln)
+    if not na(old.lb)
+        label.delete(old.lb)
+    true
+isDuplicate(float price, bool longSide, int classId) =>
+    bool duplicate = false
+    int index = 0
+    while index < array.size(levels) and not duplicate
+        Level current = array.get(levels, index)
+        duplicate := current.longSide == longSide and current.classId == classId and math.abs(current.price - price) < minGapUsd
+        index += 1
+    duplicate
+addLevel(float rawPrice, color levelColor, int days, bool longSide, int classId, int leverage, float oiUsdM) =>
+    float price = math.round_to_mintick(rawPrice)
+    bool added = false
+    bool correctSide = longSide ? price < close : price > close
+    if price > 0 and correctSide and math.abs(price / close - 1.0) * 100.0 <= maxDistance
+        if not isDuplicate(price, longSide, classId)
+            // Evict BEFORE allocation: never exceed either declared object limit.
+            while array.size(levels) >= maxLevels
+                removeLevel(0)
+            line ln = line.new(x1 = time_close, y1 = price, x2 = time_close + 1, y2 = price, xloc = xloc.bar_time, extend = extend.right, color = levelColor, style = line.style_dotted, width = 2)
+            label lb = na
+            if showLabels
+                string sideText = longSide ? "Long" : "Short"
+                string classText = classId == 0 ? "H" : classId == 1 ? "M" : "L"
+                string labelText = sideText + " " + classText + " " + str.tostring(leverage) + "x | ~" + str.tostring(oiUsdM, "0.00") + " Mio USD OI+"
+                color textColor = classId == 2 and longSide or classId == 0 and not longSide ? color.white : color.black
+                lb := label.new(x = time_close, y = price, text = labelText, xloc = xloc.bar_time, yloc = yloc.price, color = levelColor, style = label.style_label_left, textcolor = textColor, size = size.tiny)
+                label.set_tooltip(lb, "Model estimate at " + str.tostring(price, format.mintick) + ". OI+ is the entire triggering bar's estimated OI increase, repeated across classes; do not sum these labels. Not actual liquidations.")
+            array.push(levels, Level.new(ln, lb, price, bar_index, time_close, days * 86400000, longSide, classId))
+            added := true
+    added
+
+bool contextOk = syminfo.prefix == "BINANCE" and syminfo.ticker == "BTCUSDT.P" and timeframe.isminutes and timeframe.multiplier == 15 and chart.is_standard
+// Same timeframe only; no higher-timeframe/lookahead trick or forward-filled OI.
+// Matching timestamps and consecutive valid values prevent deltas over missing bars.
+[oi, oiTime] = request.security(oiSymbol, timeframe.period, [close, time], gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_off, ignore_invalid_symbol = true)
+bool oiAvailable = not na(oi) and oi >= 0 and not na(oiTime) and oiTime == time
+bool oiPairValid = oiAvailable and not na(oi[1]) and oi[1] >= 0 and not na(oiTime[1]) and oiTime[1] == time[1]
+float oiDelta = oiPairValid ? oi - oi[1] : na
+float notionalIncrease = oiUnit == "BTC" ? oiDelta * btcPerUnit * close : oiDelta
+bool isNew = contextOk and barstate.isconfirmed and not na(notionalIncrease) and notionalIncrease >= minUsdM * 1000000.0
+bool isLong = close > close[1]
+bool isShort = close < close[1]
+// All persistent mutations occur at candle close. No varip or intrabar creation.
+if barstate.isconfirmed
+    // Reverse while is safe for zero elements and multiple adjacent removals.
+    // Cleanup BEFORE deduplication so dead levels cannot suppress new candidates.
+    int index = array.size(levels) - 1
+    while index >= 0
+        Level current = array.get(levels, index)
+        // Do not use the creation candle's earlier high/low against a close-time entry.
+        // Crossing beyond a level in a gap also retires it (v1 semantics).
+        bool touched = bar_index > current.birthBar and (current.longSide ? low <= current.price : high >= current.price)
+        bool expired = time_close - current.birthTime >= current.lifetimeMs
+        bool distant = math.abs(current.price / close - 1.0) * 100.0 > maxDistance
+        if touched or expired or distant
+            removeLevel(index)
+        index -= 1
+    if isNew and (isLong or isShort)
+        float oiUsdM = notionalIncrease / 1000000.0
+        if showHigh
+            addLevel(isLong ? close * (1.0 - 1.0 / levHigh) : close * (1.0 + 1.0 / levHigh), isLong ? longHighColor : shortHighColor, daysHigh, isLong, 0, levHigh, oiUsdM)
+        if showMedium
+            addLevel(isLong ? close * (1.0 - 1.0 / levMedium) : close * (1.0 + 1.0 / levMedium), isLong ? longMediumColor : shortMediumColor, daysMedium, isLong, 1, levMedium, oiUsdM)
+        if showLow
+            addLevel(isLong ? close * (1.0 - 1.0 / levLow) : close * (1.0 + 1.0 / levLow), isLong ? longLowColor : shortLowColor, daysLow, isLong, 2, levLow, oiUsdM)
+    // Reuse labels; no label allocation while extending existing levels.
+    if showLabels and (barstate.islast or barstate.islastconfirmedhistory)
+        int labelIndex = 0
+        while labelIndex < array.size(levels)
+            Level current = array.get(levels, labelIndex)
+            if not na(current.lb)
+                label.set_x(current.lb, time_close)
+            labelIndex += 1
+// Diagnostics use the last confirmed chart candle, including during an open bar.
+var float confirmedOi = na
+var float confirmedDelta = na
+var float confirmedNotional = na
+var bool confirmedOiAvailable = false
+var bool confirmedPairValid = false
+var int confirmedTime = na
+if barstate.isconfirmed
+    confirmedOi := oiAvailable ? oi : na
+    confirmedDelta := oiDelta
+    confirmedNotional := notionalIncrease
+    confirmedOiAvailable := oiAvailable
+    confirmedPairValid := oiPairValid
+    confirmedTime := time_close
+formatValue(float value) =>
+    na(value) ? "n/a" : str.tostring(value, "0.########")
+var table panel = table.new(position.top_right, 2, 8, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast
+    table.clear(panel, 0, 0, 1, 7)
+    string warning = not contextOk ? "Use BINANCE:BTCUSDT.P / 15m / standard chart" : not confirmedOiAvailable ? "WARNING: OI missing / invalid / timestamp mismatch" : not confirmedPairValid ? "WARNING: no consecutive OI pair; no new levels" : "OK - confirmed candles only"
+    bool healthy = contextOk and confirmedOiAvailable and confirmedPairValid
+    if diagnostic or not healthy
+        table.cell(panel, 0, 0, "CWS Free v1.2", text_color = color.white)
+        table.cell(panel, 1, 0, warning, text_color = healthy ? color.lime : color.orange)
+    if diagnostic
+        table.cell(panel, 0, 1, "OI symbol / unit", text_color = color.white)
+        table.cell(panel, 1, 1, oiSymbol + " / " + oiUnit, text_color = color.white)
+        table.cell(panel, 0, 2, "OI (confirmed)", text_color = color.white)
+        table.cell(panel, 1, 2, formatValue(confirmedOi), text_color = color.white)
+        table.cell(panel, 0, 3, "OI delta (signed)", text_color = color.white)
+        table.cell(panel, 1, 3, formatValue(confirmedDelta), text_color = color.white)
+        table.cell(panel, 0, 4, "Delta notional (Mio USD)", text_color = color.white)
+        table.cell(panel, 1, 4, formatValue(confirmedNotional / 1000000.0), text_color = color.white)
+        table.cell(panel, 0, 5, "Active / limit", text_color = color.white)
+        table.cell(panel, 1, 5, str.tostring(array.size(levels)) + " / " + str.tostring(maxLevels), text_color = color.white)
+        table.cell(panel, 0, 6, "Last confirmed close (UTC)", text_color = color.white)
+        table.cell(panel, 1, 6, na(confirmedTime) ? "n/a" : str.format_time(confirmedTime, "yyyy-MM-dd HH:mm", "UTC"), text_color = color.white)
+        table.cell(panel, 0, 7, "Model", text_color = color.white)
+        table.cell(panel, 1, 7, "OI proxy; no actual liquidation data", text_color = color.orange)
+plotchar(barstate.isconfirmed and not oiAvailable, title = "OI data unavailable", char = "!", location = location.top, color = color.red, size = size.tiny)
