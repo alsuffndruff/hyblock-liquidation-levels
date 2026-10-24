@@ -1,0 +1,210 @@
+//@version=6
+indicator("CWS Liquidation Levels v1.3 - Footprint experiment", overlay = true, max_lines_count = 350, max_labels_count = 350)
+// Experimental A/B comparison on the SAME available OI + footprint candles.
+// Default: OI growth + footprint initiative, not verified trader direction.
+// TradingView Premium / Ultimate required. No automatic fallback.
+// Target: BINANCE:BTCUSDT.P, standard 15-minute chart.
+// Experimental estimates, NOT actual liquidation orders or trader positions.
+// The script owns only its own lines/labels/table. No boxes or manual drawings.
+string oiSymbol = input.symbol("BINANCE:BTCUSDT.P_OI", "Binance Open Interest symbol", group = "OI")
+string oiUnit = input.string("BTC", "OI feed unit", options = ["BTC", "USD"], group = "OI", tooltip = "Verify the feed unit. BTC: delta x BTC per unit x BTC price. USD: delta directly.")
+float btcPerUnit = input.float(1.0, "BTC per OI unit (BTC mode)", minval = 0.00000001, group = "OI")
+float minUsdM = input.float(5.0, "Minimum estimated OI increase (million USD)", minval = 0.1, step = 0.5, group = "OI")
+float minGapUsd = input.float(50.0, "Minimum level spacing (USD)", minval = 0.0, step = 1.0, group = "Levels", tooltip = "Only compares active levels of the SAME side and leverage class. 0 disables deduplication. Duplicates are skipped, not summed.")
+float maxDistance = input.float(15.0, "Maximum distance from price (%)", minval = 0.1, maxval = 100.0, group = "Levels")
+int maxLevels = input.int(100, "Maximum active levels (all classes combined)", minval = 10, maxval = 350, group = "Levels")
+bool showLabels = input.bool(true, "Show OI / leverage labels", group = "Levels")
+int levHigh = input.int(100, "High leverage", minval = 2, group = "Leverage / lifetime")
+int levMedium = input.int(50, "Medium leverage", minval = 2, group = "Leverage / lifetime")
+int levLow = input.int(25, "Low leverage", minval = 2, group = "Leverage / lifetime")
+int daysHigh = input.int(60, "High leverage lifetime (days)", minval = 1, maxval = 3650, group = "Leverage / lifetime")
+int daysMedium = input.int(14, "Medium leverage lifetime (days)", minval = 1, maxval = 3650, group = "Leverage / lifetime")
+int daysLow = input.int(14, "Low leverage lifetime (days)", minval = 1, maxval = 3650, group = "Leverage / lifetime")
+bool showHigh = input.bool(true, "Show high leverage", group = "Leverage / lifetime")
+bool showMedium = input.bool(true, "Show medium leverage", group = "Leverage / lifetime")
+bool showLow = input.bool(true, "Show low leverage", group = "Leverage / lifetime")
+bool diagnostic = input.bool(true, "Diagnostic mode", group = "Diagnostics")
+string modelMode = input.string("OI + Footprint", "Model / controlled comparison", options = ["OI + Footprint", "OI + close direction (shared coverage)"], group = "Experiment")
+float minDeltaPct = input.float(10.0, "Minimum absolute footprint delta (%)", minval = 0.0, maxval = 100.0, group = "Experiment", tooltip = "Experimental threshold; not a calibrated probability. Zero delta never selects a side.")
+int rowTicks = input.int(100, "Ticks per footprint row", minval = 1, group = "Experiment")
+int startTime = input.time(0, "Earliest event candle opening time", group = "Experiment", tooltip = "Use the same starting time in both model modes. Existing levels before this time are not reconstructed.")
+bool footprintMode = modelMode == "OI + Footprint"
+// Six distinct fixed colors: Long H/M/L = lime/aqua/blue;
+// Short H/M/L = red/orange/yellow. Classes remain distinct even if leverage inputs match.
+color longHighColor = color.rgb(0, 230, 118)
+color longMediumColor = color.rgb(0, 188, 212)
+color longLowColor = color.rgb(41, 98, 255)
+color shortHighColor = color.rgb(255, 23, 68)
+color shortMediumColor = color.rgb(255, 145, 0)
+color shortLowColor = color.rgb(255, 234, 0)
+// A single record prevents parallel arrays from becoming misaligned.
+type Level
+    line ln
+    label lb
+    float price
+    int birthBar
+    int birthTime
+    int lifetimeMs
+    bool longSide
+    int classId
+var array<Level> levels = array.new<Level>()
+// Mutable collection lets the creation helper report capacity losses.
+var array<int> capacityLosses = array.new_int(1, 0)
+removeLevel(int index) =>
+    Level old = array.remove(levels, index)
+    line.delete(old.ln)
+    if not na(old.lb)
+        label.delete(old.lb)
+    true
+isDuplicate(float price, bool longSide, int classId) =>
+    bool duplicate = false
+    int index = 0
+    while index < array.size(levels) and not duplicate
+        Level current = array.get(levels, index)
+        duplicate := current.longSide == longSide and current.classId == classId and math.abs(current.price - price) < minGapUsd
+        index += 1
+    duplicate
+addLevel(float rawPrice, color levelColor, int days, bool longSide, int classId, int leverage, float oiUsdM, float eventDeltaPct) =>
+    float price = math.round_to_mintick(rawPrice)
+    bool added = false
+    bool correctSide = longSide ? price < close : price > close
+    if price > 0 and correctSide and math.abs(price / close - 1.0) * 100.0 <= maxDistance
+        if not isDuplicate(price, longSide, classId)
+            // Evict BEFORE allocation: never exceed either declared object limit.
+            while array.size(levels) >= maxLevels
+                removeLevel(0)
+                array.set(capacityLosses, 0, array.get(capacityLosses, 0) + 1)
+            line ln = line.new(x1 = time_close, y1 = price, x2 = time_close + 1, y2 = price, xloc = xloc.bar_time, extend = extend.right, color = levelColor, style = line.style_dotted, width = 2)
+            label lb = na
+            if showLabels
+                string sideText = longSide ? "Long est." : "Short est."
+                string classText = classId == 0 ? "H" : classId == 1 ? "M" : "L"
+                string labelText = sideText + " " + classText + " " + str.tostring(leverage) + "x | ~" + str.tostring(oiUsdM, "0.00") + " Mio USD OI+"
+                color textColor = classId == 2 and longSide or classId == 0 and not longSide ? color.white : color.black
+                lb := label.new(x = time_close, y = price, text = labelText, xloc = xloc.bar_time, yloc = yloc.price, color = levelColor, style = label.style_label_left, textcolor = textColor, size = size.tiny)
+                label.set_tooltip(lb, "Model estimate at " + str.tostring(price, format.mintick) + ". Event close UTC: " + str.format_time(time_close, "yyyy-MM-dd HH:mm", "UTC") + ". Footprint delta: " + str.tostring(eventDeltaPct, "0.0") + "%. OI+ is the entire triggering bar's estimated OI increase, repeated across classes; do not sum these labels. Side and leverage are assumptions. Not actual liquidations.")
+            array.push(levels, Level.new(ln, lb, price, bar_index, time_close, days * 86400000, longSide, classId))
+            added := true
+    added
+
+bool contextOk = syminfo.prefix == "BINANCE" and syminfo.ticker == "BTCUSDT.P" and timeframe.isminutes and timeframe.multiplier == 15 and chart.is_standard
+// Same timeframe only; no higher-timeframe/lookahead trick or forward-filled OI.
+// Matching timestamps and consecutive valid values prevent deltas over missing bars.
+[oi, oiTime] = request.security(oiSymbol, timeframe.period, [close, time], gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_off, ignore_invalid_symbol = true)
+bool oiAvailable = not na(oi) and oi >= 0 and not na(oiTime) and oiTime == time
+bool oiPairValid = oiAvailable and not na(oi[1]) and oi[1] >= 0 and not na(oiTime[1]) and oiTime[1] == time[1]
+float oiDelta = oiPairValid ? oi - oi[1] : na
+float notionalIncrease = oiUnit == "BTC" ? oiDelta * btcPerUnit * close : oiDelta
+// One footprint request, on the chart dataset only.
+footprint fp = request.footprint(rowTicks)
+bool hasFp = not na(fp)
+float fpBuy = hasFp ? fp.buy_volume() : na
+float fpSell = hasFp ? fp.sell_volume() : na
+float fpTotal = hasFp ? fp.total_volume() : na
+float fpDelta = hasFp ? fp.delta() : na
+bool fpValid = hasFp and not na(fpBuy) and not na(fpSell) and not na(fpTotal) and not na(fpDelta) and fpBuy >= 0 and fpSell >= 0 and fpTotal > 0
+float fpDeltaPct = fpValid ? 100.0 * fpDelta / fpTotal : na
+bool inWindow = time >= startTime
+bool sharedData = contextOk and inWindow and oiPairValid and fpValid
+bool oiThreshold = not na(notionalIncrease) and notionalIncrease >= minUsdM * 1000000.0
+bool fpLong = fpValid and fpDeltaPct > 0 and fpDeltaPct >= minDeltaPct
+bool fpShort = fpValid and fpDeltaPct < 0 and fpDeltaPct <= -minDeltaPct
+bool closeLong = not na(close[1]) and close > close[1]
+bool closeShort = not na(close[1]) and close < close[1]
+bool isLong = footprintMode ? fpLong : closeLong
+bool isShort = footprintMode ? fpShort : closeShort
+// Baseline mode also requires footprint availability: equal eligible history.
+// Its direction rule reproduces v1.2, but not v1.2's longer OI-only history.
+bool isNew = sharedData and barstate.isconfirmed and oiThreshold
+var int eligibleBars = 0
+var int sharedBars = 0
+var int baselineEvents = 0
+var int filteredEvents = 0
+var int firstShared = na
+var int lastShared = na
+if contextOk and barstate.isconfirmed and inWindow
+    eligibleBars += 1
+    if sharedData
+        sharedBars += 1
+        if na(firstShared)
+            firstShared := time
+        lastShared := time_close
+        baselineEvents += oiThreshold and (closeLong or closeShort) ? 1 : 0
+        filteredEvents += oiThreshold and (fpLong or fpShort) ? 1 : 0
+// All persistent mutations occur at candle close. No varip or intrabar creation.
+if barstate.isconfirmed
+    // Reverse while is safe for zero elements and multiple adjacent removals.
+    // Cleanup BEFORE deduplication so dead levels cannot suppress new candidates.
+    int index = array.size(levels) - 1
+    while index >= 0
+        Level current = array.get(levels, index)
+        // Do not use the creation candle's earlier high/low against a close-time entry.
+        // Crossing beyond a level in a gap also retires it (v1 semantics).
+        bool touched = bar_index > current.birthBar and (current.longSide ? low <= current.price : high >= current.price)
+        bool expired = time_close - current.birthTime >= current.lifetimeMs
+        bool distant = math.abs(current.price / close - 1.0) * 100.0 > maxDistance
+        if touched or expired or distant
+            removeLevel(index)
+        index -= 1
+    if isNew and (isLong or isShort)
+        float oiUsdM = notionalIncrease / 1000000.0
+        if showHigh
+            addLevel(isLong ? close * (1.0 - 1.0 / levHigh) : close * (1.0 + 1.0 / levHigh), isLong ? longHighColor : shortHighColor, daysHigh, isLong, 0, levHigh, oiUsdM, fpDeltaPct)
+        if showMedium
+            addLevel(isLong ? close * (1.0 - 1.0 / levMedium) : close * (1.0 + 1.0 / levMedium), isLong ? longMediumColor : shortMediumColor, daysMedium, isLong, 1, levMedium, oiUsdM, fpDeltaPct)
+        if showLow
+            addLevel(isLong ? close * (1.0 - 1.0 / levLow) : close * (1.0 + 1.0 / levLow), isLong ? longLowColor : shortLowColor, daysLow, isLong, 2, levLow, oiUsdM, fpDeltaPct)
+    // Reuse labels; no label allocation while extending existing levels.
+    if showLabels and (barstate.islast or barstate.islastconfirmedhistory)
+        int labelIndex = 0
+        while labelIndex < array.size(levels)
+            Level current = array.get(levels, labelIndex)
+            if not na(current.lb)
+                label.set_x(current.lb, time_close)
+            labelIndex += 1
+// Dashboard snapshots refer to the last confirmed candle.
+var float confirmedOi = na
+var float confirmedNotional = na
+var float confirmedFpDelta = na
+var bool confirmedOiValid = false
+var bool confirmedFpValid = false
+var int confirmedTime = na
+var string lastDecision = "Waiting for a confirmed candle"
+if contextOk and barstate.isconfirmed
+    confirmedOi := oiAvailable ? oi : na
+    confirmedNotional := notionalIncrease
+    confirmedFpDelta := fpDeltaPct
+    confirmedOiValid := oiPairValid
+    confirmedFpValid := fpValid
+    confirmedTime := time_close
+    lastDecision := not inWindow ? "Before selected start" : not oiPairValid ? "No consecutive OI pair" : not fpValid ? "No valid footprint; no new levels" : not oiThreshold ? "OI+ below threshold" : not (isLong or isShort) ? "Direction filter not met" : isLong ? "Long estimate candidate" : "Short estimate candidate"
+formatValue(float value) =>
+    na(value) ? "n/a" : str.tostring(value, "0.###")
+utc(int value) =>
+    na(value) ? "n/a" : str.format_time(value, "yyyy-MM-dd HH:mm", "UTC")
+var table panel = table.new(position.top_right, 2, 14, bgcolor = color.rgb(30, 33, 40), border_width = 1)
+panelRow(int row, string title, string value, color ink) =>
+    table.cell(panel, 0, row, title, text_color = color.silver, text_size = size.small)
+    table.cell(panel, 1, row, value, text_color = ink, text_size = size.small)
+if barstate.islast
+    table.clear(panel, 0, 0, 1, 13)
+    bool healthy = contextOk and confirmedOiValid and confirmedFpValid
+    string warning = not contextOk ? "Use BINANCE:BTCUSDT.P / 15m / standard" : na(confirmedTime) ? "Waiting for candle close" : not healthy ? "Data missing; new levels blocked" : "OI + footprint available"
+    panelRow(0, "CWS v1.3 experiment", warning, healthy ? color.lime : color.orange)
+    if diagnostic
+        panelRow(1, "Mode", modelMode, color.white)
+        panelRow(2, "Last confirmed close UTC", utc(confirmedTime), color.white)
+        panelRow(3, "OI / configured feed unit", formatValue(confirmedOi) + " / " + oiUnit, color.white)
+        panelRow(4, "OI delta Mio. USD approx. / FP delta %", formatValue(confirmedNotional / 1000000.0) + " / " + formatValue(confirmedFpDelta), color.white)
+        panelRow(5, "Last candle decision", lastDecision, color.yellow)
+        panelRow(6, "Active / limit", str.tostring(array.size(levels)) + " / " + str.tostring(maxLevels), color.white)
+        panelRow(7, "Capacity removals (loaded run)", str.tostring(array.get(capacityLosses, 0)), array.get(capacityLosses, 0) > 0 ? color.orange : color.white)
+        panelRow(8, "Shared / loaded candles after start", str.tostring(sharedBars) + " / " + str.tostring(eligibleBars), color.white)
+        panelRow(9, "First shared opening UTC", utc(firstShared), color.white)
+        panelRow(10, "Last shared close UTC (gaps possible)", utc(lastShared), color.white)
+        panelRow(11, "Candidates close / footprint rule", str.tostring(baselineEvents) + " / " + str.tostring(filteredEvents), color.white)
+        panelRow(12, "Threshold OI+ M USD / absolute FP %", str.tostring(minUsdM) + " / " + str.tostring(minDeltaPct), color.white)
+        panelRow(13, "Model", "Side/leverage estimates; no liquidation feed", color.orange)
+plot(contextOk and barstate.isconfirmed ? notionalIncrease / 1000000.0 : na, "Signed OI change (M USD approx.)", display = display.data_window)
+plot(contextOk and barstate.isconfirmed ? fpDeltaPct : na, "Footprint delta (%)", display = display.data_window)
+plot(contextOk and barstate.isconfirmed ? (sharedData ? 1 : 0) : na, "Shared data eligibility (1/0)", display = display.data_window)
