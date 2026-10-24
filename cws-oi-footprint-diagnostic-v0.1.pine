@@ -1,0 +1,128 @@
+//@version=6
+indicator("CWS OI + Footprint Datentest v0.1", overlay = false, precision = 3)
+// Standalone diagnostic for BINANCE:BTCUSDT.P / standard 15m candles.
+// Requires TradingView Premium or Ultimate. Does not create liquidation levels.
+// Footprint buy/sell classification is not a Binance taker-side flag.
+string oiSymbol = input.symbol("BINANCE:BTCUSDT.P_OI", "OI-Symbol", group = "Open Interest")
+string oiUnit = input.string("BTC", "OI-Einheit (Feed pruefen)", options = ["BTC", "USD"], group = "Open Interest")
+float btcPerUnit = input.float(1.0, "BTC je OI-Einheit (BTC-Modus)", minval = 0.00000001, group = "Open Interest")
+int rowTicks = input.int(100, "Ticks je Footprint-Zeile", minval = 1, group = "Footprint")
+float minOiM = input.float(5.0, "OI+-Schwelle (Mio. USD, ca.)", minval = 0.1, step = 0.5, group = "Einordnung")
+float minDeltaPct = input.float(10.0, "Mindest-Delta-Anteil (%)", minval = 0.0, maxval = 100.0, group = "Einordnung", tooltip = "Heuristische Schwelle, keine gemessene Wahrscheinlichkeit neuer Long-/Short-Positionen.")
+
+bool contextOk = syminfo.prefix == "BINANCE" and syminfo.ticker == "BTCUSDT.P" and timeframe.isminutes and timeframe.multiplier == 15 and chart.is_standard
+// Consecutive OI candles only. No forward filling or delta across missing data.
+[oi, oiTime] = request.security(oiSymbol, timeframe.period, [close, time], gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_off, ignore_invalid_symbol = true)
+bool oiAvailable = not na(oi) and oi >= 0 and not na(oiTime) and oiTime == time
+bool pairOk = oiAvailable and not na(oi[1]) and oi[1] >= 0 and not na(oiTime[1]) and oiTime[1] == time[1]
+float oiChange = pairOk ? oi - oi[1] : na
+float deltaBtc = oiUnit == "BTC" ? oiChange * btcPerUnit : close > 0 ? oiChange / close : na
+// Approximate signed notional change, NOT individual position size.
+float deltaUsd = oiUnit == "BTC" ? deltaBtc * close : oiChange
+
+// Exactly one footprint request. Guard every object accessor against na.
+footprint fp = request.footprint(rowTicks)
+bool hasFp = not na(fp)
+float buyRaw = hasFp ? fp.buy_volume() : na
+float sellRaw = hasFp ? fp.sell_volume() : na
+float totalRaw = hasFp ? fp.total_volume() : na
+float fpDelta = hasFp ? fp.delta() : na
+bool fpOk = hasFp and not na(buyRaw) and not na(sellRaw) and not na(totalRaw) and not na(fpDelta) and buyRaw >= 0 and sellRaw >= 0 and totalRaw > 0
+float deltaPct = fpOk ? 100.0 * fpDelta / totalRaw : na
+// Only infer BTC units when the chart feed explicitly reports base volume.
+bool baseVolume = syminfo.volumetype == "base" and syminfo.basecurrency == "BTC"
+float turnoverM = fpOk and baseVolume ? totalRaw * close / 1000000.0 : na
+float oiVolumePct = pairOk and fpOk and baseVolume ? 100.0 * deltaBtc / totalRaw : na
+float coveragePct = fpOk and not na(volume) and volume > 0 ? 100.0 * totalRaw / volume : na
+volume_row poc = hasFp ? fp.poc() : na
+float pocLow = not na(poc) ? poc.down_price() : na
+float pocHigh = not na(poc) ? poc.up_price() : na
+
+// This describes simultaneous OI growth and classified volume initiative only.
+bool oiEvent = pairOk and not na(deltaUsd) and deltaUsd >= minOiM * 1000000.0
+bool buyBias = fpOk and deltaPct > 0 and deltaPct >= minDeltaPct
+bool sellBias = fpOk and deltaPct < 0 and deltaPct <= -minDeltaPct
+string reading = not pairOk or not fpOk ? "Daten fehlen" : not oiEvent ? "Kein OI+-Schwellenereignis" : buyBias ? "OI+ / Kaufinitiative" : sellBias ? "OI+ / Verkaufsinitiative" : "OI+ / gemischtes Volumen"
+
+// Freeze dashboard values at candle close, including during the next open bar.
+// Slots: OI, delta BTC, delta USD M, buy, sell, delta, delta %, ratio %, POC low,
+// POC high, footprint/chart volume %, approximate turnover USD M.
+var array<float> snapshot = array.new_float(12, na)
+var int confirmedTime = na
+var string confirmedReading = "Noch keine abgeschlossene Kerze"
+var bool confirmedPair = false
+var bool confirmedFp = false
+var int checkedBars = 0
+var int oiBars = 0
+var int fpBars = 0
+var int jointBars = 0
+var int buyEvents = 0
+var int sellEvents = 0
+if barstate.isconfirmed and contextOk
+    confirmedTime := time_close
+    confirmedPair := pairOk
+    confirmedFp := fpOk
+    confirmedReading := reading
+    array.set(snapshot, 0, oiAvailable ? oi : na)
+    array.set(snapshot, 1, deltaBtc)
+    array.set(snapshot, 2, deltaUsd / 1000000.0)
+    array.set(snapshot, 3, fpOk ? buyRaw : na)
+    array.set(snapshot, 4, fpOk ? sellRaw : na)
+    array.set(snapshot, 5, fpOk ? fpDelta : na)
+    array.set(snapshot, 6, deltaPct)
+    array.set(snapshot, 7, oiVolumePct)
+    array.set(snapshot, 8, pocLow)
+    array.set(snapshot, 9, pocHigh)
+    array.set(snapshot, 10, coveragePct)
+    array.set(snapshot, 11, turnoverM)
+    checkedBars += 1
+    oiBars += pairOk ? 1 : 0
+    fpBars += fpOk ? 1 : 0
+    jointBars += pairOk and fpOk ? 1 : 0
+    buyEvents += oiEvent and buyBias ? 1 : 0
+    sellEvents += oiEvent and sellBias ? 1 : 0
+
+bool closedContext = contextOk and barstate.isconfirmed
+// Native units in the pane; BTC label only when unit metadata confirms it.
+plot(closedContext and baseVolume and fpOk ? fpDelta : na, "Footprint Delta (BTC)", color = fpDelta >= 0 ? color.teal : color.orange, style = plot.style_columns)
+plot(closedContext and pairOk ? deltaBtc : na, "OI-Aenderung (BTC, USD-Modus ca.)", color = color.fuchsia, linewidth = 2)
+hline(0, "Null", color.gray)
+// Data Window provides historical metrics when selecting a closed candle.
+plot(closedContext ? deltaUsd / 1000000.0 : na, "OI-Aenderung (Mio. USD, ca.)", display = display.data_window)
+plot(closedContext and fpOk ? buyRaw : na, "Footprint Buy (Feed-Einheit)", display = display.data_window)
+plot(closedContext and fpOk ? sellRaw : na, "Footprint Sell (Feed-Einheit)", display = display.data_window)
+plot(closedContext ? deltaPct : na, "Footprint Delta-Anteil (%)", display = display.data_window)
+plot(closedContext ? oiVolumePct : na, "OI-Aenderung / Footprint-Volumen (%)", display = display.data_window)
+plot(closedContext ? pocLow : na, "POC Unterkante", display = display.data_window)
+plot(closedContext ? pocHigh : na, "POC Oberkante", display = display.data_window)
+plot(closedContext ? coveragePct : na, "Footprint / Chart-Volumen (%)", display = display.data_window)
+
+fmt(float value) =>
+    na(value) ? "n/a" : str.tostring(value, "0.###")
+val(int index) =>
+    fmt(array.get(snapshot, index))
+var table panel = table.new(position.top_right, 2, 17, bgcolor = color.rgb(30, 33, 40), border_width = 1)
+row(int index, string title, string value, color ink) =>
+    table.cell(panel, 0, index, title, text_color = color.silver, text_size = size.small)
+    table.cell(panel, 1, index, value, text_color = ink, text_size = size.small)
+if barstate.islast
+    string status = not contextOk ? "BINANCE:BTCUSDT.P / 15m / Standard verwenden" : na(confirmedTime) ? "Warte auf Kerzenschluss" : not confirmedPair ? "OI-Paar fehlt / Zeitstempel pruefen" : not confirmedFp ? "Footprint fehlt / kein positives Volumen" : not baseVolume ? "Rohdaten vorhanden; Volumeneinheit pruefen" : "OI + Footprint vorhanden"
+    color health = contextOk and confirmedPair and confirmedFp and baseVolume ? color.lime : color.orange
+    string rawUnit = baseVolume ? "BTC" : "Feed-Einheit (ungeprueft)"
+    row(0, "CWS Datentest v0.1", status, health)
+    row(1, "Letzter Schluss (UTC)", na(confirmedTime) ? "n/a" : str.format_time(confirmedTime, "yyyy-MM-dd HH:mm", "UTC"), color.white)
+    row(2, "OI / konfigurierte Einheit", val(0) + " / " + oiUnit, color.white)
+    row(3, "OI-Aenderung BTC / Mio. USD ca.", val(1) + " / " + val(2), color.white)
+    row(4, "Footprint Buy / Sell (" + rawUnit + ")", val(3) + " / " + val(4), color.white)
+    row(5, "Footprint Delta / Anteil %", val(5) + " / " + val(6), color.white)
+    row(6, "OI-Aenderung / FP-Volumen %", val(7), color.white)
+    row(7, "POC-Bereich (kein belegter Einstieg)", val(8) + " - " + val(9), color.white)
+    row(8, "Footprint / Chart-Volumen %", val(10), color.white)
+    row(9, "FP-Umsatz Mio. USD ca. (Volumen x Schluss)", val(11), color.white)
+    row(10, "Heuristische Einordnung", confirmedReading, color.yellow)
+    row(11, "Geladene abgeschlossene Kerzen", str.tostring(checkedBars), color.white)
+    row(12, "OI-Paar / FP / beide vorhanden", str.tostring(oiBars) + " / " + str.tostring(fpBars) + " / " + str.tostring(jointBars), color.white)
+    row(13, "OI+ mit Kauf- / Verkaufsinitiative", str.tostring(buyEvents) + " / " + str.tostring(sellEvents), color.white)
+    row(14, "Feed-Volumentyp / Basis", syminfo.volumetype + " / " + syminfo.basecurrency, color.white)
+    row(15, "Mark / Funding / Liquidationen", "In diesem Datentest nicht abgefragt", color.silver)
+    row(16, "Grenze", "Keine Positionen / Hebel / Liquidationen nachgewiesen", color.orange)
