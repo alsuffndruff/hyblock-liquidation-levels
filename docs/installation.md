@@ -1,4 +1,4 @@
-# Installation und Konfiguration von v1.7.2
+# Installation und Konfiguration von v1.8
 
 ## Installation
 
@@ -19,6 +19,9 @@ Die aktuelle Pine-Datei als neues Indikatorskript im TradingView-Pine-Editor öf
 | Seitenhypothese | Both sides |
 | Analysebeginn | 17.10.2026 00:00 UTC |
 | Einheitliche Linienbreite | 3 |
+| Long-/Short-Linienfarbe | Türkis / Korall, frei wählbar |
+| Legendenschrift | Groß (16) |
+| Zahlenschrift | Groß (20) |
 | Preislabels auf der Skala | ein |
 | Kleine Farblegende | ein |
 | OI-Größenlabels in der Linienmitte | aus |
@@ -32,6 +35,8 @@ Standardmäßig stehen aktive Preise auf der Skala: Long grün, Short rot. Histo
 
 Die kleine Legende unten rechts zeigt die sechs Linienfarben: Long-/Short-Seite und die konfigurierten Hebelszenarien A/B/C. Deaktivierte Szenarien sind markiert. Unter **History / display → Show color legend** lässt sie sich ausschalten.
 
+Unter **Appearance** lassen sich **Long-Farbe**, **Short-Farbe**, **Legendenschrift** und **Zahlenschrift** ändern. Die Legende verwendet neutrale Zellen mit separaten Farbmusterlinien. Die Basisfarben bestimmen Linien, Legende und Zahlenlabel-Hintergründe; hellere Hebelszenarien werden automatisch abgeleitet. Die Zahlenschrift wechselt für den Kontrast zwischen hell und dunkel. Zur Erhaltung aller 45 Skalenplätze behalten Skalenplots feste Türkis-/Korallfarben; sie übernehmen frei gewählte Linienfarben nicht.
+
 Unter **History / display → Show OI size at line midpoint** lassen sich optionale Größenlabels einschalten, Vorgabe aus. Sichtbar ist nur eine Zahl mit zwei Dezimalstellen, etwa `30.43`. Das bedeutet 30,43 Mio. USD geschätzte Netto-OI-Zunahme der auslösenden Kerze, keine gemessene einzelne Positionsgröße. Die Einheit und Grenze stehen in der Legende und im Tooltip. Derselbe Ereigniswert kann auf mehreren Long-/Short-/Hebelszenarien erscheinen und darf nicht summiert werden.
 
 Das Label sitzt zeitlich in der Mitte der gesamten gespeicherten Linie. Bei aktiven Linien wandert es mit deren Ende, nach einer Berührung bleibt es an der finalen Mitte. Bei starkem Hineinzoomen kann die Mitte einer langen Linie außerhalb des sichtbaren Ausschnitts liegen. Pro gespeicherter Linie wird höchstens ein Label erzeugt; ausgeschaltet entstehen keine Größenlabel-Objekte. Diese Labeloption verändert keine Levelpreise oder Erzeugungsregeln.
@@ -41,6 +46,14 @@ Das Label sitzt zeitlich in der Mitte der gesamten gespeicherten Linie. Bei akti
 Falls Skalenlabels fehlen, im Indikator unter Stil die Labels auf der Preisskala und gegebenenfalls in den globalen Chart-Einstellungen aktivieren. Den Indikator gegebenenfalls derselben rechten Preisskala wie BTC zuordnen.
 
 Das gesamte Diagnosefenster wird unter **Analysis → Show diagnostic panel** eingeschaltet. Die Anzeigeoption beeinflusst weder Skalenlabels noch Berechnung oder CSV-Export. Bei ausgeschaltetem Fenster stehen Hinweise zu fehlenden Daten nur nach Einschalten zur Verfügung.
+
+## Verschieben des Charts und Linienenden
+
+Die Skalenplots sind nicht mehr auf die letzte Datenkerze begrenzt. Beim horizontalen Verschieben wird ihr aktiver Bestand am rechten sichtbaren Balken aufgebaut und anschließend für diese Ansicht gehalten. Beim Blick in die Vergangenheit gelten also die damals bis zum sichtbaren Kerzenschluss bekannten Level, nicht spätere Ereignisse. Bei einer noch offenen rechten Kerze stammt der Bestand weiterhin aus den bereits bestätigten Kerzen. Vor den ersten Ereignissen oder außerhalb der geladenen Historie können entsprechend keine aktiven Level vorliegen.
+
+Die Signalberechnung liest keine sichtbaren Chartgrenzen. Nur die Skalendarstellung hängt davon ab. Die 19 numerischen Datenexport-Spalten bleiben unverändert; Skalenplots sind Darstellungswerte der jeweiligen Ansicht und keine zusätzliche Ereignisquelle.
+
+Nach bestätigter Berührung/GAP endet eine Linie nun am Zeitstempel der auslösenden Kerze. `time_close` lag bereits beim Beginn der nächsten Kerze und ließ sie visuell einen Balken zu weit reichen. Dies ändert nur das sichtbare Ende, nicht den Zeitpunkt, zu dem die Berührung erkannt wird. Bei Berührung direkt in der Folgekerze kann das Segment sehr kurz sein; ein Ende vor seiner Geburt wird verhindert. Altersablauf behält seinen bisherigen Schlusszeitpunkt.
 
 ## Weitere Zeitrahmen
 
@@ -62,7 +75,7 @@ Die Ereignis- und OI-Spalten bleiben enthalten. Der redundante Export `Aligned O
 
 ## Noch offen
 
-Die lokalen Anzeigeverträge lassen sich aus dem Repository-Verzeichnis mit `node tests/check-legend-size.cjs` prüfen. Dazu gehören unter anderem ausschließlich numerischer Labeltext, standardmäßig ausgeschaltete Größenlabels, unveränderte Signal-/Exportblöcke und das Plotbudget von 64. Die Prüfung ist kein Pine-Compiler.
+Die lokalen Anzeigeverträge lassen sich aus dem Repository-Verzeichnis mit `node tests/check-readable-display.cjs` prüfen. Dazu gehören historische Skalen-Snapshots ohne zukünftige Ereignisse, Treffkerzen-Enden, ausschließlich numerischer Labeltext, standardmäßig ausgeschaltete Größenlabels, unveränderte Signal-/Exportblöcke und das Plotbudget von 64. Die Prüfung ist kein Pine-Compiler.
 
 Lokale Quell-, Plotbudget-, Slot- und Intrabar-Grenzprüfungen sind erfolgt. Ein TradingView-Compilerlauf und die visuelle Prüfung der aktuellen Version sind noch offen unter [#4](https://github.com/alsuffndruff/hyblock-liquidation-levels/issues/4). Eine höhere Preisabdeckung ist ein gesondertes Forschungsziel unter [#5](https://github.com/alsuffndruff/hyblock-liquidation-levels/issues/5).
 

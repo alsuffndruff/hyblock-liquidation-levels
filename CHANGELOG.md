@@ -4,6 +4,16 @@
 
 Die Einträge bis einschließlich v1.6.2 dokumentieren nachträglich Arbeit aus dem Chat. Sie sind keine Behauptung, dass diese Fassungen bereits zuvor im Repository lagen.
 
+### v1.8 – Freigegebenes lesbares Design und Darstellungsfehler (#11, #12, #13)
+
+- Neutrale Legende mit separaten Farbmusterlinien statt farbig gefüllter Felder, wie im freigegebenen Bildentwurf.
+- Legendenschrift Normal/Groß/Sehr groß = 14/16/20; Zahlenschrift = 16/20/24. Vorgabe jeweils Groß, numerische Labels fett und mit kontrastabhängiger Textfarbe.
+- Frei wählbare Long-/Short-Basisfarben für Linien, Legende und Zahlenlabels; hellere Szenario-Abstufungen automatisch. Skalenmarker behalten feste Türkis-/Korallfarben, damit 19 Exportplots plus 45 Skalenplots unter dem Limit von 64 bleiben.
+- Skalenbestand wird am rechten sichtbaren Balken aus dem damals bekannten aktiven Bestand kopiert und über spätere unsichtbare Balken eingefroren. Die vorherige Beschränkung auf letzte Datenkerze/show_last=1 entfällt.
+- Bei einem nach links verschobenen historischen Ausschnitt beziehen sich die Skalenmarker damit auf dessen rechten sichtbaren Zeitpunkt, nicht auf den heutigen aktiven Bestand. Spätere Ereignisse werden nicht vorweggenommen.
+- Berührte/GAP-Linien enden visuell am time der Treffkerze statt an deren time_close. Erkennung bleibt bestätigt am Schluss. Altersablauf, Geburt und exportierte Erstellungszeit bleiben unverändert; Ende nie vor Geburt.
+- Neues lokales Prüfskript für unveränderten Modell-/Exportkern, Snapshot-Kausalität, Treff-/Ablaufgrenzen und Plotbudget. Tatsächliche Scroll-/Sichtprüfung bleibt #4.
+
 ### v1.7.2 – Farblegende und optionale Größenlabels (#9, #10)
 
 - Kleine, separat schaltbare Farblegende unten rechts, Vorgabe an. Zeigt Long-/Short-Schattierungen sowie aktuelle Hebelszenarien A/B/C, einschließlich deaktivierter Szenarien.
