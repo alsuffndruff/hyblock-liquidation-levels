@@ -2,7 +2,7 @@
 
 ## Aktuelle Version
 
-v1.7.1 enthält den bestehenden Modellkern mit OI+CVD als Vorgabe, Linienbreite 3, ausschließlich aktiven Preislabels auf der Skala und standardmäßig ausgeschaltetem Diagnosefenster. Hinzu kommen weitere Zeitrahmen mit angepasster Delta-Auflösung. Anzeige und Zeitrahmenerweiterung wurden lokal geprüft. Ihre Ausführung im TradingView-Pine-v6-Editor und die visuelle Darstellung sind noch offen: [Issue #4](https://github.com/alsuffndruff/hyblock-liquidation-levels/issues/4). Die nachfolgende quantitative Prüfung bezieht sich auf den bisherigen 15m-Stand; für weitere Perioden wird keine kalibrierte Qualität behauptet.
+v1.7.2 enthält den bestehenden Modellkern mit OI+CVD als Vorgabe, Linienbreite 3, aktiven Preislabels auf der Skala und standardmäßig ausgeschaltetem Diagnosefenster. Hinzu kommen weitere Zeitrahmen mit angepasster Delta-Auflösung, eine kleine Farblegende und optionale rein numerische OI-Größenlabels in der Linienmitte (Vorgabe aus). Anzeige und Zeitrahmenerweiterung wurden lokal geprüft. Die Labeloption verändert keine Levelpreise oder Erzeugungsregeln; ein Wert ist geschätzte Ereignis-Netto-OI-Zunahme, keine Einzelposition. Die Ausführung im TradingView-Pine-v6-Editor und die visuelle Darstellung sind noch offen: [Issue #4](https://github.com/alsuffndruff/hyblock-liquidation-levels/issues/4). Die nachfolgende quantitative Prüfung bezieht sich auf den bisherigen 15m-Stand; für weitere Perioden wird keine kalibrierte Qualität behauptet.
 
 ## Tatsächliche TradingView-Exporte
 

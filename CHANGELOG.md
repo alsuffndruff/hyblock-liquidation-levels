@@ -4,6 +4,15 @@
 
 Die Einträge bis einschließlich v1.6.2 dokumentieren nachträglich Arbeit aus dem Chat. Sie sind keine Behauptung, dass diese Fassungen bereits zuvor im Repository lagen.
 
+### v1.7.2 – Farblegende und optionale Größenlabels (#9, #10)
+
+- Kleine, separat schaltbare Farblegende unten rechts, Vorgabe an. Zeigt Long-/Short-Schattierungen sowie aktuelle Hebelszenarien A/B/C, einschließlich deaktivierter Szenarien.
+- Optionale Zahlenlabels in der zeitlichen Linienmitte, Vorgabe aus. Text enthält ausschließlich den Wert mit zwei Dezimalstellen, ohne Präfix oder Einheit.
+- Größenwert ist die geschätzte Netto-OI-Zunahme der Ereigniskerze in Mio. USD, keine einzelne Position. Einheit und Grenze stehen in Legende und Tooltip. Mehrfach auf Szenarien wiedergegebene Ereigniswerte dürfen nicht addiert werden.
+- Höchstens ein Label je gespeicherter Linie, maximal 500. Aktive Labels folgen der Mitte der gespeicherten Linie; beendete bleiben am finalen Mittelpunkt erhalten. Bestehende Levelpreise werden nicht verschoben.
+- Signal-/Deduplizierungsregeln, Exportserien, Skalenplots und OI+CVD/Breite-3-Vorgaben unverändert. Weiterhin 64 Plot-Counts; Diagnosefenster standardmäßig aus.
+- Quelländerungen, numerischen Text, Konstruktorfelder und Mittelpunktgrenzen lokal geprüft. TradingView-Prüfung bleibt #4.
+
 ### v1.7.1 – Diagnosefenster aus (#8)
 
 - Das komplette Diagnosepanel standardmäßig ausblenden; Konfigurationsschalter `Show diagnostic panel`.

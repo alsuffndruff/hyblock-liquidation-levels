@@ -1,4 +1,4 @@
-# Installation und Konfiguration von v1.7.1
+# Installation und Konfiguration von v1.7.2
 
 ## Installation
 
@@ -20,13 +20,21 @@ Die aktuelle Pine-Datei als neues Indikatorskript im TradingView-Pine-Editor öf
 | Analysebeginn | 17.10.2026 00:00 UTC |
 | Einheitliche Linienbreite | 3 |
 | Preislabels auf der Skala | ein |
+| Kleine Farblegende | ein |
+| OI-Größenlabels in der Linienmitte | aus |
 | Diagnosefenster | aus |
 
 Das Datum und alle Fenster sind Modellparameter. Ein anderer Analysebeginn verändert den Bestand und spätere Deduplizierung. Die Fenster werden nicht automatisch auf eine gleichbleibende Uhrzeitdauer umgerechnet.
 
 ## Darstellung
 
-Es gibt keine Textlabel-Objekte direkt an den Linien. Aktive Preise stehen auf der Skala: Long grün, Short rot. Historische HIT/GAP/AGE-Linien bleiben erhalten, ohne aktive Skalenlabels.
+Standardmäßig stehen aktive Preise auf der Skala: Long grün, Short rot. Historische HIT/GAP/AGE-Linien bleiben erhalten, ohne aktive Skalenlabels.
+
+Die kleine Legende unten rechts zeigt die sechs Linienfarben: Long-/Short-Seite und die konfigurierten Hebelszenarien A/B/C. Deaktivierte Szenarien sind markiert. Unter **History / display → Show color legend** lässt sie sich ausschalten.
+
+Unter **History / display → Show OI size at line midpoint** lassen sich optionale Größenlabels einschalten, Vorgabe aus. Sichtbar ist nur eine Zahl mit zwei Dezimalstellen, etwa `30.43`. Das bedeutet 30,43 Mio. USD geschätzte Netto-OI-Zunahme der auslösenden Kerze, keine gemessene einzelne Positionsgröße. Die Einheit und Grenze stehen in der Legende und im Tooltip. Derselbe Ereigniswert kann auf mehreren Long-/Short-/Hebelszenarien erscheinen und darf nicht summiert werden.
+
+Das Label sitzt zeitlich in der Mitte der gesamten gespeicherten Linie. Bei aktiven Linien wandert es mit deren Ende, nach einer Berührung bleibt es an der finalen Mitte. Bei starkem Hineinzoomen kann die Mitte einer langen Linie außerhalb des sichtbaren Ausschnitts liegen. Pro gespeicherter Linie wird höchstens ein Label erzeugt; ausgeschaltet entstehen keine Größenlabel-Objekte. Diese Labeloption verändert keine Levelpreise oder Erzeugungsregeln.
 
 19 Datenplots und 45 Skalenplots belegen das Pine-Limit von 64 Plot-Counts. Es gibt höchstens 22 Long- und 23 Short-Labels; bei Überschreitung werden kursnähere aktive Level bevorzugt. Alle übrigen Linien bleiben bestehen. Enge Preise können abhängig vom Zoom überlagern.
 
@@ -53,6 +61,8 @@ Nur der 15m-Stand wurde gegen die vorhandenen Referenzbilder verglichen. Auf 1m 
 Die Ereignis- und OI-Spalten bleiben enthalten. Der redundante Export `Aligned OI` wurde durch `Delta resolution seconds` ersetzt; `TV OI raw (confirmed)` bleibt die OI-Quelle. Der Delta-Anteil heißt jetzt `Estimated delta share (adaptive TF)`. CSV-Auswerter müssen gegebenenfalls diese Spaltennamen berücksichtigen. Die Chartauflösung ist über die CSV-Zeitstempel erkennbar.
 
 ## Noch offen
+
+Die lokalen Anzeigeverträge lassen sich aus dem Repository-Verzeichnis mit `node tests/check-legend-size.cjs` prüfen. Dazu gehören unter anderem ausschließlich numerischer Labeltext, standardmäßig ausgeschaltete Größenlabels, unveränderte Signal-/Exportblöcke und das Plotbudget von 64. Die Prüfung ist kein Pine-Compiler.
 
 Lokale Quell-, Plotbudget-, Slot- und Intrabar-Grenzprüfungen sind erfolgt. Ein TradingView-Compilerlauf und die visuelle Prüfung der aktuellen Version sind noch offen unter [#4](https://github.com/alsuffndruff/hyblock-liquidation-levels/issues/4). Eine höhere Preisabdeckung ist ein gesondertes Forschungsziel unter [#5](https://github.com/alsuffndruff/hyblock-liquidation-levels/issues/5).
 
