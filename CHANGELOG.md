@@ -4,6 +4,16 @@
 
 Die Einträge bis einschließlich v1.6.2 dokumentieren nachträglich Arbeit aus dem Chat. Sie sind keine Behauptung, dass diese Fassungen bereits zuvor im Repository lagen.
 
+### v1.9 – Gleiche Legendenbreite und passende Skalenfarben (#14, #15)
+
+- Long-/Short-Hälfte aus derselben expliziten Breite ableiten; Farbmuster und Werte besitzen identische Spaltenbreiten. Breite je Hälfte in Appearance einstellbar.
+- Zahlenschrift standardmäßig Normal/16 statt Groß/20, größere Optionen weiterhin verfügbar.
+- Skalenpreise, tatsächliche Level-Farben und Seiten gemeinsam einfügen/entfernen; keine festen abweichenden Türkis-/Korallmarker mehr.
+- Wegen des Pine-Plotbudgets zwei Fassungen: Chart mit 32 gemeinsamen dynamisch gefärbten Plätzen/64 Counts; Export mit allen 19 bisherigen numerischen Datenspalten und 22 gemeinsamen Farbplätzen/63 Counts.
+- Bei Überlauf kursnächste aktive Level beider Seiten gemeinsam priorisieren; keine separaten Long-/Short-Quoten mehr. Das betrifft nur Beschriftungen, nicht Erzeugungen oder Historienlinien.
+- Der Nutzer hat die weitere Änderung des Preislabel-Verhaltens zurückgenommen. Rechter sichtbarer Bezugspunkt sowie natives gefülltes/umrandetes Rendering bleiben erhalten; keine Offset-/Trackprice-Tricks und kein Versprechen, TradingViews Neuzeichenphasen zu verhindern.
+- Tests für gekoppelte Farb-/Preisarrays, Kapazitätsüberlauf, gleiche Breiten, kleinere Vorgabe, unveränderten Modellkern und exakte Exportserie bestehen lokal. TradingView-UI-Prüfung weiterhin #4.
+
 ### v1.8 – Freigegebenes lesbares Design und Darstellungsfehler (#11, #12, #13)
 
 - Neutrale Legende mit separaten Farbmusterlinien statt farbig gefüllter Felder, wie im freigegebenen Bildentwurf.

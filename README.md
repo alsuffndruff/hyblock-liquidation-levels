@@ -2,9 +2,10 @@
 
 Experimentelle Pine-v6-Indikatoren zur Untersuchung OI-basierter Liquidationsszenarien auf `BINANCE:BTCUSDT.P`. Die aktuelle Variante verwendet kostenlose Kurs-/OI-Daten und preisbasierte Delta-Schätzungen. Sie ist kein originalgetreuer Nachbau von Hyblock.
 
-## Aktuelle Version: v1.8
+## Aktuelle Version: v1.9
 
-- [Pine-Datei v1.8](cws-liquidation-levels-v1.8-readable.pine)
+- [Pine-Chartfassung v1.9](cws-liquidation-levels-v1.9-chart.pine): bis zu 32 gemeinsame, passend gefärbte Skalenplätze.
+- [Pine-Exportfassung v1.9](cws-liquidation-levels-v1.9-export.pine): vollständige bisherige CSV-Datenserien und bis zu 22 gemeinsame Farbplätze. Bei Bedarf statt der Chartfassung verwenden, nicht zusätzlich.
 - [Installation, Darstellung und Zeitrahmen](docs/installation.md)
 - [Änderungsprotokoll](CHANGELOG.md)
 - [Quantitativer Prüfstand und Grenzen](docs/validation-summary.md)
@@ -13,7 +14,7 @@ Vorgaben: **OI+CVD**, einheitliche **Linienbreite 3**, Preislabels auf der Skala
 
 Zeitbasierte Charts ab 1 Minute werden unterstützt, mit angepasster Delta-Auflösung für größere Perioden. Die Parameter wurden bisher nur auf **15m** mit den vorhandenen Bildreferenzen verglichen. Andere Zeitrahmen sind unkalibriert. Der aktuelle Anzeigestand und die Zeitrahmenerweiterung wurden lokal geprüft; ein tatsächlicher TradingView-Compiler-/Sichttest steht noch aus: [#4](https://github.com/alsuffndruff/hyblock-liquidation-levels/issues/4).
 
-Neu in v1.8: lesbare neutrale Legende, getrennte Schriftgrößen und frei wählbare Long-/Short-Linienfarben. Die Skalenlabels werden beim Verschieben am rechten sichtbaren Chartbalken aufgebaut. Berührte Linien enden visuell am Balken der Berührung statt am Beginn des nächsten Balkens. Skalenmarker behalten feste Türkis-/Korallfarben zur Erhaltung der vollen Kapazität. Die direkte TradingView-Sichtprüfung dieser Änderungen ist noch offen unter #4.
+Neu in v1.9: gleich breite Legendenhälften, etwas kleinere Größenlabels (Normal/16) und Skalenfarben passend zu jedem Level und Größenlabel. Die Farben werden zusammen mit den Preisen gespeichert. Der bisherige rechte sichtbare Bezugspunkt und die native gefüllte/umrandete Skalendarstellung bleiben unverändert. Kurzes Ausblenden während einer TradingView-Neuberechnung wird nicht als behoben ausgegeben. Die direkte TradingView-Sichtprüfung ist offen unter #4.
 
 ## Änderungsverfolgung
 
@@ -25,6 +26,7 @@ Ab sofort wird vor einer fachlichen Änderung ein GitHub-Issue angelegt oder wei
 
 ## Historische Versionen
 
+- [v1.8 – Lesbares Design und Treffkerzen-Ende](cws-liquidation-levels-v1.8-readable.pine)
 - [v1.7.2 – Farblegende und optionale Größenlabels](cws-liquidation-levels-v1.7.2-legend-size.pine)
 - [v1.7.1 – Diagnosefenster standardmäßig aus](cws-liquidation-levels-v1.7.1-multi-timeframe.pine)
 - [v1.7 – Zeitrahmenerweiterung](versions/cws-liquidation-levels-v1.7-multi-timeframe.pine)
@@ -40,7 +42,7 @@ Ab sofort wird vor einer fachlichen Änderung ein GitHub-Issue angelegt oder wei
 
 ## Lokale Anzeigeprüfung
 
-Aus dem Repository-Verzeichnis: `node tests/check-readable-display.cjs`. Die Prüfung schützt den Modell-/Exportkern, den historischen Skalenbestand, Treffkerzen-Enden, Schrift-/Farbvorgaben und das Plotbudget. Sie ersetzt keinen TradingView-Compilerlauf. `tests/check-legend-size.cjs` bleibt als Prüfung des historischen v1.7.2-Stands erhalten.
+Aus dem Repository-Verzeichnis: `node tests/check-scale-colors.cjs`. Die Prüfung schützt Preis-/Farbzuordnung auch bei Überlauf, gleich breite Legendenhälften, kleinere Schriftvorgabe, unveränderte Signal-/Exportregeln und beide Plotbudgets. Sie ersetzt keinen TradingView-Compilerlauf. Die vorherigen Prüfscripte bleiben für ihre historischen Fassungen erhalten.
 
 ## Modellgrenzen
 

@@ -1,0 +1,509 @@
+//@version=6
+indicator("CWS Liquidation Levels - TV Reconstruction v1.9 EXPORT", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// TradingView OHLC + OI only. No imported reference prices / external API.
+// OI impulse size is NOT the size of an individual trader position.
+// Reconstruction hypothesis, NOT extracted Hyblock/Leviathan source.
+// Color = side + leverage shade; all lines share uniformLineWidth.
+// No hardcoded screenshot level prices. Experimental parameter calibration only.
+// Settings selected on 20-22 Oct 2026; measured separately on 23-24 Oct.
+// Density target fitted on 20-22 Oct; later days 23-24 Oct are already known.
+// Cross-class spacing suppresses NEW candidates; accepted levels never move.
+// Fewer active lines, but reference coverage is lower. See density report.
+// Never delete drawings on a touch, expiry, distance change or capacity limit.
+// At capacity, STOP allocation. Change start time / settings to rebuild the dataset.
+
+string oiSymbol = input.symbol("BINANCE:BTCUSDT.P_OI", "OI symbol", group = "TradingView data")
+string oiUnit = input.string("BTC", "OI unit (verify feed)", options = ["BTC", "USD"], group = "TradingView data")
+float btcPerUnit = input.float(1.0, "BTC per OI unit", minval = 0.00000001, group = "TradingView data")
+int analysisStart = input.time(timestamp("17 Oct 2026 00:00 +0000"), "Analysis starts (UTC)", group = "TradingView data")
+string entryMethod = input.string("Close", "Assumed entry price", options = ["HALF", "Close", "HLC3", "OC2", "VWMA"], group = "TradingView data")
+int entryLength = input.int(30, "VWMA length", minval = 1, maxval = 500, group = "TradingView data")
+string signalSource = input.string("OI+CVD", "Experimental event model", options = ["OI", "OI+VOL", "OI+CVD"], group = "Event model")
+int statsLength = input.int(150, "Prior-bar statistical window", minval = 20, maxval = 1000, group = "Event model")
+float smallK = input.float(1.2, "Small event score from", minval = 0.1, step = 0.1, group = "Event model")
+float mediumK = input.float(2.0, "Medium event score from", minval = 0.1, step = 0.1, group = "Event model")
+float largeK = input.float(3.0, "Large event score from", minval = 0.1, step = 0.1, group = "Event model")
+float sensitivity = input.float(1.0, "Threshold multiplier", minval = 0.1, step = 0.1, group = "Event model")
+float minUsdM = input.float(1.0, "Additional absolute OI floor (Mio USD)", minval = 0.0, step = 0.5, group = "Event model")
+float minParticipation = input.float(0.0, "Minimum delta OI / volume (0 = off)", minval = 0.0, maxval = 1.0, step = 0.01, group = "Event model")
+string sideModel = input.string("Both sides", "Side hypothesis", options = ["Both sides", "Delta consensus", "Price proxy"], group = "Direction / delta")
+int cvdLength = input.int(30, "Rolling delta window (chart bars)", minval = 1, maxval = 500, group = "Direction / delta")
+float deltaThreshold = input.float(0.10, "Minimum absolute delta / volume", minval = 0.0, maxval = 1.0, step = 0.01, group = "Direction / delta")
+float maintenancePct = input.float(0.0, "Assumed maintenance margin (%)", minval = 0.0, maxval = 1.0, step = 0.05, group = "Leverage assumptions", tooltip = "0 = simple 1/leverage distance. Hypothesis only, not the exchange's actual risk tier. Must be below 100/leverage for every enabled scenario.")
+
+// Custom scenario colors shared by lines, midpoint labels, legend and scale markers.
+color longBaseColor = input.color(color.rgb(0, 216, 196), "Long-Farbe", group = "Appearance", tooltip = "Basisfarbe fuer Long-Linien, Legende, Zahlenlabels und passende Skalenmarkierungen.")
+color shortBaseColor = input.color(color.rgb(255, 91, 91), "Short-Farbe", group = "Appearance", tooltip = "Basisfarbe fuer Short-Linien, Legende, Zahlenlabels und passende Skalenmarkierungen.")
+string legendTextSize = input.string("Groß", "Legendenschrift", options = ["Normal", "Groß", "Sehr groß"], group = "Appearance")
+string numberTextSize = input.string("Normal", "Zahlenschrift", options = ["Normal", "Groß", "Sehr groß"], group = "Appearance")
+int legendFontSize = legendTextSize == "Normal" ? 14 : legendTextSize == "Groß" ? 16 : 20
+int legendHalfWidth = input.int(12, "Breite je Legendenhälfte (%)", minval = 8, maxval = 20, group = "Appearance", tooltip = "Long und Short erhalten immer dieselbe Breite. Prozent der Chartflaeche je Haelfte.")
+float legendSwatchWidth = legendHalfWidth / 3.0
+float legendValueWidth = legendHalfWidth - legendSwatchWidth
+int numberFontSize = numberTextSize == "Normal" ? 16 : numberTextSize == "Groß" ? 20 : 24
+lighterColor(color base, float fraction) =>
+    color.rgb(int(math.round(color.r(base) + (255 - color.r(base)) * fraction)), int(math.round(color.g(base) + (255 - color.g(base)) * fraction)), int(math.round(color.b(base) + (255 - color.b(base)) * fraction)), color.t(base))
+numberContrast(color background) =>
+    0.299 * color.r(background) + 0.587 * color.g(background) + 0.114 * color.b(background) >= 140 ? color.rgb(16, 20, 29) : color.white
+color longHighColor = longBaseColor
+color longMediumColor = lighterColor(longBaseColor, 0.25)
+color longLowColor = lighterColor(longBaseColor, 0.55)
+color shortHighColor = shortBaseColor
+color shortMediumColor = lighterColor(shortBaseColor, 0.25)
+color shortLowColor = lighterColor(shortBaseColor, 0.55)
+
+bool useHigh = input.bool(true, "Show scenario A", inline = "a", group = "Leverage assumptions")
+int levHigh = input.int(100, "x", minval = 2, inline = "a", group = "Leverage assumptions")
+bool useMedium = input.bool(true, "Show scenario B", inline = "b", group = "Leverage assumptions")
+int levMedium = input.int(50, "x", minval = 2, inline = "b", group = "Leverage assumptions")
+bool useLow = input.bool(true, "Show scenario C", inline = "c", group = "Leverage assumptions")
+int levLow = input.int(25, "x", minval = 2, inline = "c", group = "Leverage assumptions")
+
+float minGapUsd = input.float(400.0, "Minimum spacing / side / leverage (USD)", minval = 0.0, step = 1.0, group = "History / display", tooltip = "Same side AND same numeric leverage: reject a NEW candidate closer than this distance to an active level. 0 disables this class-specific rule. Existing prices never move; no volume is added. The separate cross-class rule can still apply.")
+float crossClassGapUsd = input.float(50.0, "Minimum spacing / side / OTHER leverage (USD)", minval = 0.0, step = 1.0, group = "History / display", tooltip = "Same side, DIFFERENT numeric leverage: reject a NEW candidate if closer than this amount to an active level. 0 disables cross-class filtering. First accepted level stays unchanged. This does not sum OI, merge positions, or delete history.")
+float maxDistance = input.float(15.0, "Maximum distance at CREATION (%)", minval = 0.1, maxval = 100.0, group = "History / display")
+int lifetimeDays = input.int(0, "Active lifetime (days; 0 = unlimited)", minval = 0, maxval = 3650, group = "History / display", tooltip = "Expiry stops the line and marks AGE. The drawing stays visible. A later touch is not counted after expiry.")
+int maxLevels = input.int(500, "Total drawing limit (active + history)", minval = 10, maxval = 500, group = "History / display")
+int uniformLineWidth = input.int(3, "Uniform line width", minval = 1, maxval = 4, group = "History / display", tooltip = "One width for every active and historical level, independent of leverage and OI event class. Changing it rebuilds the script with the same calculation settings.")
+bool showColorLegend = input.bool(true, "Show color legend", group = "History / display")
+bool showOiSizeLabels = input.bool(false, "Show OI size at line midpoint", group = "History / display", tooltip = "Nur die Zahl: geschaetzte Netto-OI-Zunahme der Ereigniskerze in Mio. USD, keine einzelne Positionsgroesse. Der gleiche Ereigniswert wird bei mehreren Hebelszenarien wiederholt: nicht addieren. Labels stehen in der Mitte der gespeicherten Linie und bleiben auch bei beendeten Linien erhalten.")
+bool showPriceScaleLabels = input.bool(true, "Show active prices on price scale", group = "History / display", tooltip = "Bis zu 22 gemeinsame farbige Skalenwerte fuer Long und Short, passend zur Level-Farbe. Bei mehr aktiven Leveln werden die kursnaechsten bevorzugt. Der rechte sichtbare Bezugspunkt und das native Skalenverhalten bleiben erhalten.")
+int historyTransparency = input.int(15, "Ended line transparency", minval = 0, maxval = 90, group = "History / display")
+bool diagnostic = input.bool(false, "Show diagnostic panel", group = "Analysis", tooltip = "Show or hide the entire diagnostic table. Price-scale labels, exports and model calculations remain independent.")
+
+type Level
+    line ln
+    label oiSizeLabel
+    float price
+    int birthBar
+    int birthTime
+    bool longSide
+    int leverage
+    int sizeClass
+    color baseColor
+    float oiIncreaseM
+    int status
+    // status: 0 active, 1 touched by bar range, 2 expired, 3 crossed in a gap
+
+var array<Level> levels = array.new<Level>()
+
+scenarioColor(bool longSide, int leverage) =>
+    longSide ? (leverage == levHigh ? longHighColor : leverage == levMedium ? longMediumColor : longLowColor) : (leverage == levHigh ? shortHighColor : leverage == levMedium ? shortMediumColor : shortLowColor)
+
+isDuplicate(float price, bool longSide, int leverage) =>
+    bool duplicate = false
+    int index = 0
+    while index < array.size(levels) and not duplicate
+        Level current = array.get(levels, index)
+        float requiredGap = current.leverage == leverage ? minGapUsd : crossClassGapUsd
+        duplicate := current.status == 0 and current.longSide == longSide and math.abs(current.price - price) < requiredGap
+        index += 1
+    duplicate
+
+addLevel(float entry, bool longSide, int leverage, int sizeClass, float impulseM) =>
+    float maintenance = maintenancePct / 100.0
+    float rawPrice = longSide ? entry * (1.0 - 1.0 / leverage) / (1.0 - maintenance) : entry * (1.0 + 1.0 / leverage) / (1.0 + maintenance)
+    float price = math.round_to_mintick(rawPrice)
+    bool correctSide = longSide ? price < close : price > close
+    // Result 1: created, 0: filtered/duplicate, -1: full. No eviction.
+    int result = 0
+    if price > 0 and correctSide and math.abs(price / close - 1.0) * 100.0 <= maxDistance
+        if not isDuplicate(price, longSide, leverage)
+            if array.size(levels) >= maxLevels
+                result := -1
+            else
+                color levelColor = scenarioColor(longSide, leverage)
+                line ln = line.new(x1 = time_close, y1 = price, x2 = time_close + 1, y2 = price, xloc = xloc.bar_time, extend = extend.none, color = levelColor, style = line.style_dotted, width = uniformLineWidth)
+                label oiSizeLabel = na
+                if showOiSizeLabels
+                    // Visible label text is numeric ONLY; unit and limitations are in legend/tooltip.
+                    oiSizeLabel := label.new(x = time_close, y = price, text = str.tostring(impulseM, "0.00"), xloc = xloc.bar_time, yloc = yloc.price, style = label.style_label_center, color = levelColor, textcolor = numberContrast(levelColor), size = numberFontSize, textalign = text.align_center, text_formatting = text.format_bold)
+                    label.set_tooltip(oiSizeLabel, "Geschaetzte Netto-OI-Zunahme der Ereigniskerze: " + str.tostring(impulseM, "0.00") + " Mio. USD. Keine einzelne Positionsgroesse. Der Wert kann auf mehreren Long-/Short- und Hebelszenarien erscheinen: nicht addieren. Ereignis UTC: " + str.format_time(time_close, "yyyy-MM-dd HH:mm", "UTC"))
+                array.push(levels, Level.new(ln, oiSizeLabel, price, bar_index, time_close, longSide, leverage, sizeClass, levelColor, impulseM, 0))
+                result := 1
+    result
+
+bool supportedTimeframe = timeframe.isminutes or timeframe.isdwm
+float chartSeconds = supportedTimeframe ? timeframe.in_seconds() : na
+bool useChartDelta = timeframe.isminutes and timeframe.multiplier == 1
+// Keep the original 1m delta request through 4h; use coarser free intrabars above.
+string deltaTimeframe = not supportedTimeframe or chartSeconds <= 14400 ? "1" : chartSeconds <= 86400 ? "5" : chartSeconds <= 604800 ? "60" : "240"
+float deltaSeconds = timeframe.in_seconds(deltaTimeframe)
+float actualBarSeconds = not na(time_close) ? (time_close - time) / 1000.0 : na
+int expectedIntrabars = not na(actualBarSeconds) and actualBarSeconds > 0 ? int(math.ceil(actualBarSeconds / deltaSeconds)) : 0
+bool calibratedTimeframe = timeframe.isminutes and timeframe.multiplier == 15
+bool contextOk = syminfo.prefix == "BINANCE" and syminfo.ticker == "BTCUSDT.P" and chart.is_standard and supportedTimeframe
+bool thresholdsOk = smallK < mediumK and mediumK < largeK
+bool marginOk = (not useHigh or maintenancePct < 100.0 / levHigh) and (not useMedium or maintenancePct < 100.0 / levMedium) and (not useLow or maintenancePct < 100.0 / levLow)
+bool scenariosOk = useHigh or useMedium or useLow
+[oi, oiTime] = request.security(oiSymbol, timeframe.period, [close, time], gaps = barmerge.gaps_on, lookahead = barmerge.lookahead_off, ignore_invalid_symbol = true)
+bool oiAvailable = not na(oi) and oi >= 0 and not na(oiTime) and oiTime == time
+bool oiPairValid = oiAvailable and not na(oi[1]) and oi[1] >= 0 and not na(oiTime[1]) and oiTime[1] == time[1]
+float oiDelta = oiPairValid ? oi - oi[1] : na
+float notionalDelta = oiUnit == "BTC" ? oiDelta * btcPerUnit * close : oiDelta
+float impulseM = notionalDelta / 1000000.0
+float vwmaEntry = ta.vwma(hlc3, entryLength)
+float assumedEntry = entryMethod == "HALF" ? hl2 : entryMethod == "Close" ? close : entryMethod == "HLC3" ? hlc3 : entryMethod == "OC2" ? (open + close) / 2.0 : vwmaEntry
+
+// Hypothesis: positive NET OI innovations, standardized against PRIOR bars only.
+float positiveImpulse = oiPairValid ? math.max(impulseM, 0.0) : na
+float priorMean = ta.sma(positiveImpulse[1], statsLength)
+float priorSd = ta.stdev(positiveImpulse[1], statsLength)
+float priorVolume = ta.sma(volume[1], statsLength)
+float validHistory = math.sum(oiPairValid[1] ? 1.0 : 0.0, statsLength)
+bool historyReady = not na(validHistory) and validHistory == statsLength and not na(priorSd) and priorSd > 0
+float zOi = historyReady ? (positiveImpulse - priorMean) / priorSd : na
+float relativeVolume = not na(volume) and not na(priorVolume) and priorVolume > 0 ? volume / priorVolume : na
+// Chart volume on the target linear BTC contract is assumed to be in BTC.
+float deltaOiBtc = oiUnit == "BTC" ? oiDelta * btcPerUnit : oiDelta / close
+float participation = not na(volume) and volume > 0 ? deltaOiBtc / volume : na
+
+// Free price-classified delta approximation, not exchange bid/ask tape.
+// 1m charts use chart candles; higher charts use adaptive lower-timeframe candles.
+signedIntrabarVolume() =>
+    int direction = 0
+    direction := close > open ? 1 : close < open ? -1 : close > close[1] ? 1 : close < close[1] ? -1 : nz(direction[1], 0)
+    volume * direction
+
+float chartDeltaVolume = signedIntrabarVolume()
+[deltaParts, volumeParts] = request.security_lower_tf(syminfo.tickerid, deltaTimeframe, [signedIntrabarVolume(), volume], ignore_invalid_timeframe = true)
+int availableDeltaParts = na(deltaParts) ? 0 : array.size(deltaParts)
+int availableVolumeParts = na(volumeParts) ? 0 : array.size(volumeParts)
+float intrabarVolume = useChartDelta ? volume : availableVolumeParts > 0 ? array.sum(volumeParts) : na
+bool deltaAvailable = useChartDelta ? not na(volume) and volume > 0 : expectedIntrabars > 0 and availableDeltaParts >= expectedIntrabars and availableVolumeParts >= expectedIntrabars and not na(intrabarVolume) and intrabarVolume > 0
+float deltaVolume = deltaAvailable ? (useChartDelta ? chartDeltaVolume : array.sum(deltaParts)) : na
+float deltaShare = deltaAvailable ? deltaVolume / intrabarVolume : na
+float validDeltaHistory = math.sum(deltaAvailable ? 1.0 : 0.0, cvdLength)
+float cvdVolume = math.sum(intrabarVolume, cvdLength)
+float cvdDelta = math.sum(deltaVolume, cvdLength)
+bool cvdReady = not na(validDeltaHistory) and validDeltaHistory == cvdLength and not na(cvdVolume) and cvdVolume > 0
+float cvdShare = cvdReady ? cvdDelta / cvdVolume : na
+// Disclosed experimental combinations; NOT the undisclosed Leviathan formulas.
+float eventScore = signalSource == "OI" ? zOi : signalSource == "OI+VOL" ? zOi * math.sqrt(relativeVolume) : cvdReady ? zOi * (1.0 + math.abs(cvdShare)) : na
+int deltaDirection = deltaAvailable and cvdReady ? (deltaShare > deltaThreshold and cvdShare > 0 and close > close[1] ? 1 : deltaShare < -deltaThreshold and cvdShare < 0 and close < close[1] ? -1 : 0) : 0
+int priceDirection = close > close[1] ? 1 : close < close[1] ? -1 : 0
+int sideDirection = sideModel == "Delta consensus" ? deltaDirection : priceDirection
+bool participationOk = minParticipation == 0 or (not na(participation) and participation >= minParticipation)
+
+var int capacitySkipped = 0
+var int acceptedEvents = 0
+var int ambiguousEvents = 0
+var int lastCreationTime = na
+var float confirmedScore = na
+var float confirmedParticipation = na
+var float confirmedDeltaShare = na
+var bool confirmedHistoryReady = false
+var float confirmedOi = na
+var float confirmedDelta = na
+var float confirmedImpulse = na
+var float confirmedClose = na
+var bool confirmedAvailable = false
+var bool confirmedPair = false
+var int confirmedTime = na
+var string priceOiState = "Waiting for confirmed data"
+
+if barstate.isconfirmed
+    // Only mutate confirmed bars. Creation-bar extremes cannot hit a new level.
+    int index = 0
+    while index < array.size(levels)
+        Level current = array.get(levels, index)
+        if current.status == 0
+            line.set_x2(current.ln, time_close)
+            bool crossed = bar_index > current.birthBar and (current.longSide ? low <= current.price : high >= current.price)
+            bool inRange = low <= current.price and high >= current.price
+            bool expired = lifetimeDays > 0 and time_close - current.birthTime >= lifetimeDays * 86400000
+            // Price crossing takes priority on the expiry candle; sequence inside
+            // the candle is unavailable. A gap crossing is reported separately.
+            if crossed or expired
+                current.status := crossed ? (inRange ? 1 : 3) : 2
+                line.set_extend(current.ln, extend.none)
+                // Visual end is the hit/GAP candle's timestamp, not the next candle.
+                // Detection remains confirmed at the close; expiry retains its close time.
+                int visualEndTime = crossed ? time : time_close
+                line.set_x2(current.ln, math.max(current.birthTime, visualEndTime))
+                line.set_color(current.ln, color.new(current.baseColor, historyTransparency))
+            if not na(current.oiSizeLabel)
+                // Follow the actual stored line span, never change its level price.
+                int midpointTime = current.birthTime + int((line.get_x2(current.ln) - current.birthTime) / 2)
+                label.set_x(current.oiSizeLabel, midpointTime)
+                label.set_color(current.oiSizeLabel, current.status == 0 ? current.baseColor : color.new(current.baseColor, historyTransparency))
+        index += 1
+
+    bool newImpulse = contextOk and thresholdsOk and marginOk and scenariosOk and time >= analysisStart and historyReady and participationOk and not na(eventScore) and eventScore >= smallK * sensitivity and impulseM > 0 and impulseM >= minUsdM and not na(assumedEntry)
+    if newImpulse
+        int sizeClass = eventScore >= largeK * sensitivity ? 2 : eventScore >= mediumK * sensitivity ? 1 : 0
+        int created = 0
+        // Both sides explicitly models the two counterparties of new open interest.
+        // Directional modes select a proxy; they do not prove actual position sides.
+        if sideModel != "Both sides" and sideDirection == 0
+            ambiguousEvents += 1
+        int sideIndex = 0
+        while sideIndex < 2
+            bool longSide = sideIndex == 0
+            bool permitted = sideModel == "Both sides" or (longSide ? sideDirection == 1 : sideDirection == -1)
+            if permitted
+                if useHigh
+                    int result = addLevel(assumedEntry, longSide, levHigh, sizeClass, impulseM)
+                    created += result == 1 ? 1 : 0
+                    capacitySkipped += result == -1 ? 1 : 0
+                if useMedium
+                    int result = addLevel(assumedEntry, longSide, levMedium, sizeClass, impulseM)
+                    created += result == 1 ? 1 : 0
+                    capacitySkipped += result == -1 ? 1 : 0
+                if useLow
+                    int result = addLevel(assumedEntry, longSide, levLow, sizeClass, impulseM)
+                    created += result == 1 ? 1 : 0
+                    capacitySkipped += result == -1 ? 1 : 0
+            sideIndex += 1
+        acceptedEvents += created > 0 ? 1 : 0
+        if created > 0
+            lastCreationTime := time_close
+
+    confirmedScore := eventScore
+    confirmedParticipation := participation
+    confirmedDeltaShare := deltaShare
+    confirmedHistoryReady := historyReady
+    confirmedOi := oiAvailable ? oi : na
+    confirmedDelta := oiDelta
+    confirmedImpulse := impulseM
+    confirmedClose := close
+    confirmedAvailable := oiAvailable
+    confirmedPair := oiPairValid
+    confirmedTime := time_close
+    priceOiState := not oiPairValid ? "OI unavailable / gap" : oiDelta > 0 ? (close > close[1] ? "Price up / OI up: long proxy" : close < close[1] ? "Price down / OI up: short proxy" : "OI up / price unchanged") : oiDelta < 0 ? (close > close[1] ? "Price up / OI down: net reduction" : close < close[1] ? "Price down / OI down: net reduction" : "OI down / price unchanged") : "OI unchanged"
+
+formatNumber(float value) =>
+    na(value) ? "n/a" : str.tostring(value, "0.###")
+
+describeLevel(float price, float reference) =>
+    na(price) or na(reference) ? "none" : str.tostring(price, format.mintick) + " (" + str.tostring(math.abs(price / reference - 1.0) * 100.0, "0.00") + "%)"
+
+// Shared price/color slots. Each dynamic color plot consumes two plot counts.
+// 22 shared slots; right-visible anchor intentionally unchanged from v1.8.
+const int SCALE_SLOTS = 22
+var array<float> scalePrices = array.new<float>(SCALE_SLOTS, na)
+var array<color> scaleColors = array.new<color>(SCALE_SLOTS, color(na))
+var array<bool> scaleLongSides = array.new<bool>(SCALE_SLOTS, false)
+var int scaleActiveLongs = 0
+var int scaleActiveShorts = 0
+var int scaleShownLongs = 0
+var int scaleShownShorts = 0
+var int scaleSnapshotTime = na
+bool scaleAnchor = time == chart.right_visible_bar_time or (barstate.islast and (na(chart.right_visible_bar_time) or chart.right_visible_bar_time > time))
+if scaleAnchor
+    scaleActiveLongs := 0
+    scaleActiveShorts := 0
+    scaleShownLongs := 0
+    scaleShownShorts := 0
+    scaleSnapshotTime := barstate.isconfirmed ? time_close : confirmedTime
+    array.fill(scalePrices, na)
+    array.fill(scaleColors, color(na))
+    array.fill(scaleLongSides, false)
+    float scaleReference = na(confirmedClose) ? close : confirmedClose
+    int scaleIndex = 0
+    while scaleIndex < array.size(levels)
+        Level scaleLevel = array.get(levels, scaleIndex)
+        if scaleLevel.status == 0
+            if scaleLevel.longSide
+                scaleActiveLongs += 1
+            else
+                scaleActiveShorts += 1
+            if showPriceScaleLabels
+                int slot = 0
+                while slot < SCALE_SLOTS
+                    float occupiedPrice = array.get(scalePrices, slot)
+                    if na(occupiedPrice) or math.abs(scaleLevel.price - scaleReference) < math.abs(occupiedPrice - scaleReference)
+                        break
+                    slot += 1
+                if slot < SCALE_SLOTS
+                    // Insert/pop the three arrays together: price and actual color never diverge.
+                    array.insert(scalePrices, slot, scaleLevel.price)
+                    array.insert(scaleColors, slot, scaleLevel.baseColor)
+                    array.insert(scaleLongSides, slot, scaleLevel.longSide)
+                    array.pop(scalePrices)
+                    array.pop(scaleColors)
+                    array.pop(scaleLongSides)
+        scaleIndex += 1
+    int shownIndex = 0
+    while shownIndex < SCALE_SLOTS
+        if not na(array.get(scalePrices, shownIndex))
+            if array.get(scaleLongSides, shownIndex)
+                scaleShownLongs += 1
+            else
+                scaleShownShorts += 1
+        shownIndex += 1
+
+var table panel = table.new(position.top_right, 2, 14, bgcolor = color.new(color.black, 10), border_width = 1)
+if barstate.islast and diagnostic
+    int activeLongs = 0
+    int activeShorts = 0
+    int hits = 0
+    int gaps = 0
+    int aged = 0
+    float nearestLong = na
+    float nearestShort = na
+    int index = 0
+    while index < array.size(levels)
+        Level current = array.get(levels, index)
+        if current.status == 0
+            if current.longSide
+                activeLongs += 1
+                if current.price < confirmedClose and (na(nearestLong) or current.price > nearestLong)
+                    nearestLong := current.price
+            else
+                activeShorts += 1
+                if current.price > confirmedClose and (na(nearestShort) or current.price < nearestShort)
+                    nearestShort := current.price
+        else if current.status == 1
+            hits += 1
+        else if current.status == 3
+            gaps += 1
+        else
+            aged += 1
+        index += 1
+    string warning = not contextOk ? "Use Binance BTCUSDT.P / standard / time-based >=1m" : not thresholdsOk ? "Set small < medium < large" : not marginOk ? "Maintenance assumption too high for leverage" : not scenariosOk ? "Enable at least one leverage scenario" : not confirmedAvailable ? "WARNING: missing / invalid OI" : not confirmedPair ? "WARNING: no consecutive OI pair" : not confirmedHistoryReady ? "Warmup: need consecutive OI history / nonzero SD" : array.size(levels) >= maxLevels ? "FULL: stopped; move start forward to rebuild" : signalSource == "OI+CVD" and na(confirmedScore) ? "CVD window missing: no event generation" : sideModel == "Delta consensus" and na(confirmedDeltaShare) ? "Delta unavailable: no side selection" : calibratedTimeframe ? "Experimental reconstruction / confirmed TV bars" : "EXPERIMENTAL TF: defaults compared only on 15m"
+    table.clear(panel, 0, 0, 1, 13)
+    table.cell(panel, 0, 0, "CWS TV v1.9 EXPORT", text_color = color.white)
+    table.cell(panel, 1, 0, warning, text_color = color.orange)
+    table.cell(panel, 0, 1, "Price / OI analysis", text_color = color.white)
+    table.cell(panel, 1, 1, priceOiState, text_color = color.white)
+    table.cell(panel, 0, 2, "Active L / S (scenarios)", text_color = color.white)
+    table.cell(panel, 1, 2, str.tostring(activeLongs) + " / " + str.tostring(activeShorts), text_color = color.white)
+    table.cell(panel, 0, 3, "Nearest long proxy below", text_color = color.white)
+    table.cell(panel, 1, 3, describeLevel(nearestLong, confirmedClose), text_color = color.aqua)
+    table.cell(panel, 0, 4, "Nearest short proxy above", text_color = color.white)
+    table.cell(panel, 1, 4, describeLevel(nearestShort, confirmedClose), text_color = color.orange)
+    table.cell(panel, 0, 5, "Kept HIT / GAP / AGE", text_color = color.white)
+    table.cell(panel, 1, 5, str.tostring(hits) + " / " + str.tostring(gaps) + " / " + str.tostring(aged), text_color = color.white)
+    table.cell(panel, 0, 6, "Drawings / cap | skipped", text_color = color.white)
+    table.cell(panel, 1, 6, str.tostring(array.size(levels)) + " / " + str.tostring(maxLevels) + " | " + str.tostring(capacitySkipped), text_color = color.white)
+    table.cell(panel, 0, 7, "Model / direction", text_color = color.white)
+    table.cell(panel, 1, 7, signalSource + " / " + sideModel, text_color = color.white)
+    table.cell(panel, 0, 8, "Model limitation", text_color = color.white)
+    table.cell(panel, 1, 8, "Green L / Red S; shade=leverage; uniform width=" + str.tostring(uniformLineWidth), text_color = color.yellow)
+    if diagnostic
+        table.cell(panel, 0, 9, "Score / OIDV / delta-share", text_color = color.white)
+        table.cell(panel, 1, 9, formatNumber(confirmedScore) + " / " + formatNumber(confirmedParticipation) + " / " + formatNumber(confirmedDeltaShare), text_color = color.white)
+        table.cell(panel, 0, 10, "OI impulse / events / unclear", text_color = color.white)
+        table.cell(panel, 1, 10, formatNumber(confirmedImpulse) + "M / " + str.tostring(acceptedEvents) + " / " + str.tostring(ambiguousEvents), text_color = color.white)
+        table.cell(panel, 0, 11, "Last close / creation (UTC)", text_color = color.white)
+        table.cell(panel, 1, 11, (na(confirmedTime) ? "n/a" : str.format_time(confirmedTime, "MM-dd HH:mm", "UTC")) + " / " + (na(lastCreationTime) ? "none" : str.format_time(lastCreationTime, "MM-dd HH:mm", "UTC")), text_color = color.white)
+
+    table.cell(panel, 0, 12, "Scale L / S at visible right", text_color = color.white)
+    string scaleCounts = showPriceScaleLabels ? str.tostring(scaleShownLongs) + "/" + str.tostring(scaleActiveLongs) + " | " + str.tostring(scaleShownShorts) + "/" + str.tostring(scaleActiveShorts) : "off"
+    color scaleCountColor = showPriceScaleLabels and (scaleActiveLongs + scaleActiveShorts > SCALE_SLOTS) ? color.orange : color.white
+    table.cell(panel, 1, 12, scaleCounts + " @ " + (na(scaleSnapshotTime) ? "n/a" : str.format_time(scaleSnapshotTime, "MM-dd HH:mm", "UTC")), text_color = scaleCountColor)
+
+    table.cell(panel, 0, 13, "Chart / delta TF | calibration", text_color = color.white)
+    string deltaContext = useChartDelta ? "chart 1m" : deltaTimeframe + "m"
+    table.cell(panel, 1, 13, timeframe.period + " / " + deltaContext + " | " + (calibratedTimeframe ? "15m compared" : "not calibrated"), text_color = calibratedTimeframe ? color.white : color.orange)
+
+// Compact neutral legend: separate swatches and text, independent of diagnostics.
+var table colorLegend = table.new(position.bottom_right, 4, 6, bgcolor = color.new(chart.bg_color, 6), frame_color = color.new(chart.fg_color, 80), frame_width = 1)
+if barstate.isfirst
+    table.merge_cells(colorLegend, 0, 0, 1, 0)
+    table.merge_cells(colorLegend, 2, 0, 3, 0)
+    table.merge_cells(colorLegend, 0, 4, 3, 4)
+    table.merge_cells(colorLegend, 0, 5, 3, 5)
+if barstate.islast
+    table.clear(colorLegend, 0, 0, 3, 5)
+    if showColorLegend
+        color legendHeaderBg = color.new(chart.fg_color, 94)
+        table.cell(colorLegend, 0, 0, "LONG", bgcolor = legendHeaderBg, text_color = chart.fg_color, width = legendHalfWidth, text_size = legendFontSize, text_formatting = text.format_bold)
+        table.cell(colorLegend, 2, 0, "SHORT", bgcolor = legendHeaderBg, text_color = chart.fg_color, width = legendHalfWidth, text_size = legendFontSize, text_formatting = text.format_bold)
+        table.cell(colorLegend, 0, 1, "••••", text_color = color.new(scenarioColor(true, levHigh), useHigh ? 0 : 75), width = legendSwatchWidth, text_size = legendFontSize, text_halign = text.align_left)
+        table.cell(colorLegend, 1, 1, str.tostring(levHigh) + "×" + (useHigh ? "" : " (aus)"), text_color = color.new(chart.fg_color, useHigh ? 0 : 65), width = legendValueWidth, text_size = legendFontSize, text_halign = text.align_left)
+        table.cell(colorLegend, 2, 1, "••••", text_color = color.new(scenarioColor(false, levHigh), useHigh ? 0 : 75), width = legendSwatchWidth, text_size = legendFontSize, text_halign = text.align_left)
+        table.cell(colorLegend, 3, 1, str.tostring(levHigh) + "×" + (useHigh ? "" : " (aus)"), text_color = color.new(chart.fg_color, useHigh ? 0 : 65), width = legendValueWidth, text_size = legendFontSize, text_halign = text.align_left)
+        table.cell(colorLegend, 0, 2, "••••", text_color = color.new(scenarioColor(true, levMedium), useMedium ? 0 : 75), width = legendSwatchWidth, text_size = legendFontSize, text_halign = text.align_left)
+        table.cell(colorLegend, 1, 2, str.tostring(levMedium) + "×" + (useMedium ? "" : " (aus)"), text_color = color.new(chart.fg_color, useMedium ? 0 : 65), width = legendValueWidth, text_size = legendFontSize, text_halign = text.align_left)
+        table.cell(colorLegend, 2, 2, "••••", text_color = color.new(scenarioColor(false, levMedium), useMedium ? 0 : 75), width = legendSwatchWidth, text_size = legendFontSize, text_halign = text.align_left)
+        table.cell(colorLegend, 3, 2, str.tostring(levMedium) + "×" + (useMedium ? "" : " (aus)"), text_color = color.new(chart.fg_color, useMedium ? 0 : 65), width = legendValueWidth, text_size = legendFontSize, text_halign = text.align_left)
+        table.cell(colorLegend, 0, 3, "••••", text_color = color.new(scenarioColor(true, levLow), useLow ? 0 : 75), width = legendSwatchWidth, text_size = legendFontSize, text_halign = text.align_left)
+        table.cell(colorLegend, 1, 3, str.tostring(levLow) + "×" + (useLow ? "" : " (aus)"), text_color = color.new(chart.fg_color, useLow ? 0 : 65), width = legendValueWidth, text_size = legendFontSize, text_halign = text.align_left)
+        table.cell(colorLegend, 2, 3, "••••", text_color = color.new(scenarioColor(false, levLow), useLow ? 0 : 75), width = legendSwatchWidth, text_size = legendFontSize, text_halign = text.align_left)
+        table.cell(colorLegend, 3, 3, str.tostring(levLow) + "×" + (useLow ? "" : " (aus)"), text_color = color.new(chart.fg_color, useLow ? 0 : 65), width = legendValueWidth, text_size = legendFontSize, text_halign = text.align_left)
+        table.cell(colorLegend, 0, 4, "Zahlen: OI-Zunahme in Mio. USD", text_color = color.new(chart.fg_color, 20), width = legendHalfWidth * 2, text_size = math.max(12, legendFontSize - 2), text_halign = text.align_left)
+        table.cell(colorLegend, 0, 5, "Hebel: Szenarien · keine Einzelposition", text_color = color.new(chart.fg_color, 20), width = legendHalfWidth * 2, text_size = math.max(12, legendFontSize - 2), text_halign = text.align_left)
+
+// Data Window contains raw signed observations for inspection/export.
+plot(barstate.isconfirmed ? oi : na, "TV OI raw (confirmed)", display = display.data_window)
+plot(barstate.isconfirmed ? oiDelta : na, "TV OI delta (confirmed)", display = display.data_window)
+plot(barstate.isconfirmed ? impulseM : na, "Estimated delta notional (Mio USD)", display = display.data_window)
+
+plot(barstate.isconfirmed ? eventScore : na, "Experimental event score", display = display.data_window)
+plot(barstate.isconfirmed ? participation : na, "Delta OI / chart volume (unit assumption)", display = display.data_window)
+plot(barstate.isconfirmed ? deltaShare : na, "Estimated delta share (adaptive TF)", display = display.data_window)
+plot(barstate.isconfirmed ? assumedEntry : na, "Assumed entry", display = display.data_window)
+// Replace the redundant duplicate OI export; retain the 64-plot budget.
+plot(barstate.isconfirmed ? (useChartDelta ? chartSeconds : deltaSeconds) : na, "Delta resolution seconds", display = display.data_window)
+
+// Comparison-only export columns. Event prices are ACTUALLY CREATED drawings,
+// not unfiltered candidate prices. Existing event logic remains unchanged.
+float newLongA = na
+float newLongB = na
+float newLongC = na
+float newShortA = na
+float newShortB = na
+float newShortC = na
+float creationCloseUtcMs = na
+if barstate.isconfirmed
+    int exportIndex = 0
+    while exportIndex < array.size(levels)
+        Level current = array.get(levels, exportIndex)
+        if current.birthBar == bar_index
+            creationCloseUtcMs := float(current.birthTime)
+            if current.longSide
+                if current.leverage == levHigh
+                    newLongA := current.price
+                if current.leverage == levMedium
+                    newLongB := current.price
+                if current.leverage == levLow
+                    newLongC := current.price
+            else
+                if current.leverage == levHigh
+                    newShortA := current.price
+                if current.leverage == levMedium
+                    newShortB := current.price
+                if current.leverage == levLow
+                    newShortC := current.price
+        exportIndex += 1
+plot(newLongA, "Created long A (default 100x)", display = display.data_window)
+plot(newLongB, "Created long B (default 50x)", display = display.data_window)
+plot(newLongC, "Created long C (default 25x)", display = display.data_window)
+plot(newShortA, "Created short A (default 100x)", display = display.data_window)
+plot(newShortB, "Created short B (default 50x)", display = display.data_window)
+plot(newShortC, "Created short C (default 25x)", display = display.data_window)
+plot(creationCloseUtcMs, "Creation close UTC milliseconds", display = display.data_window)
+plot(barstate.isconfirmed ? array.size(levels) : na, "Stored drawings active plus history", display = display.data_window)
+plot(barstate.isconfirmed ? capacitySkipped : na, "Candidates skipped at capacity cumulative", display = display.data_window)
+
+// Additional reproducibility inputs; numeric exports do not change the price scale.
+plot(barstate.isconfirmed ? volume : na, "Chart volume (BTC assumption)", display = display.data_window)
+plot(barstate.isconfirmed ? cvdShare : na, "Rolling estimated delta share", display = display.data_window)
+
+// Native price-scale markers: same actual scenario color as the line/size label.
+// No offset/trackprice trick: retain the existing native scale rendering behavior.
+plot(array.get(scalePrices, 0), "Active Level 01", color = array.get(scaleColors, 0), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 1), "Active Level 02", color = array.get(scaleColors, 1), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 2), "Active Level 03", color = array.get(scaleColors, 2), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 3), "Active Level 04", color = array.get(scaleColors, 3), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 4), "Active Level 05", color = array.get(scaleColors, 4), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 5), "Active Level 06", color = array.get(scaleColors, 5), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 6), "Active Level 07", color = array.get(scaleColors, 6), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 7), "Active Level 08", color = array.get(scaleColors, 7), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 8), "Active Level 09", color = array.get(scaleColors, 8), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 9), "Active Level 10", color = array.get(scaleColors, 9), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 10), "Active Level 11", color = array.get(scaleColors, 10), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 11), "Active Level 12", color = array.get(scaleColors, 11), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 12), "Active Level 13", color = array.get(scaleColors, 12), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 13), "Active Level 14", color = array.get(scaleColors, 13), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 14), "Active Level 15", color = array.get(scaleColors, 14), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 15), "Active Level 16", color = array.get(scaleColors, 15), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 16), "Active Level 17", color = array.get(scaleColors, 16), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 17), "Active Level 18", color = array.get(scaleColors, 17), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 18), "Active Level 19", color = array.get(scaleColors, 18), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 19), "Active Level 20", color = array.get(scaleColors, 19), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 20), "Active Level 21", color = array.get(scaleColors, 20), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
+plot(array.get(scalePrices, 21), "Active Level 22", color = array.get(scaleColors, 21), editable = false, display = showPriceScaleLabels ? display.price_scale : display.none, format = format.price)
