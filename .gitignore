@@ -1,0 +1,7 @@
+*.csv
+*.tsv
+*.png
+*.jpg
+*.jpeg
+work/
+.DS_Store

@@ -1,18 +1,39 @@
 # Hyblock Liquidation Levels
 
-Experimentelle Pine-Script-Indikatoren zur Untersuchung OI-basierter Liquidationslevel auf `BINANCE:BTCUSDT.P` im normalen 15-Minuten-Chart.
+Experimentelle Pine-v6-Indikatoren zur Untersuchung OI-basierter Liquidationsszenarien auf `BINANCE:BTCUSDT.P`. Die aktuelle Variante verwendet kostenlose Kurs-/OI-Daten und preisbasierte Delta-Schätzungen. Sie ist kein originalgetreuer Nachbau von Hyblock.
 
-## Dateien
+## Aktuelle Version: v1.7.1
 
-- [CWS Liquidation Levels v1.3 – Footprint-Experiment](cws-liquidation-levels-v1.3-experimental.pine): OI-/Footprint-Regel mit kontrolliertem Vergleichsmodus.
-- [v1.3 einrichten und vergleichen](cws-v1.3-anleitung.md): Einstellungen, Vergleichsmethode und Grenzen.
+- [Pine-Datei v1.7.1](cws-liquidation-levels-v1.7.1-multi-timeframe.pine)
+- [Installation, Darstellung und Zeitrahmen](docs/installation.md)
+- [Änderungsprotokoll](CHANGELOG.md)
+- [Quantitativer Prüfstand und Grenzen](docs/validation-summary.md)
 
-- [OI-/Footprint-Datentest v0.1](cws-oi-footprint-diagnostic-v0.1.pine): separater Diagnoseindikator für Open Interest, Footprint-Volumen, Delta und Datenabdeckung. TradingView Premium oder Ultimate erforderlich.
-- [Anleitung und Prüfgrenzen](cws-datentest-anleitung.md): Einrichtung, Einheitenprüfung und Interpretation.
-- [CWS Liquidation Levels v1.2](cws-liquidation-levels-v1.2-original.pine): unveränderte Referenzfassung mit OI-basierten geschätzten Levels.
+Vorgaben: **OI+CVD**, einheitliche **Linienbreite 3**, **ausschließlich Preislabels auf der Skala**, Diagnosefenster **aus**. Das gesamte Diagnosefenster lässt sich unter Analysis → Show diagnostic panel einschalten. Bereits abgeholte Level bleiben als beendete Linien erhalten.
 
-## Aktueller Stand
+Zeitbasierte Charts ab 1 Minute werden unterstützt, mit angepasster Delta-Auflösung für größere Perioden. Die Parameter wurden bisher nur auf **15m** mit den vorhandenen Bildreferenzen verglichen. Andere Zeitrahmen sind unkalibriert. Der aktuelle Anzeigestand und die Zeitrahmenerweiterung wurden lokal geprüft; ein tatsächlicher TradingView-Compiler-/Sichttest steht noch aus: [#4](https://github.com/alsuffndruff/hyblock-liquidation-levels/issues/4).
 
-Der Nutzer hat den OI-/Footprint-Datentest erfolgreich auf dem Zielchart ausgeführt. Beide Datenquellen waren für 6.667 von 22.808 geladenen Kerzen gemeinsam vorhanden. Der nächste Schritt ist die Prüfung der experimentellen v1.3 im TradingView Pine-Editor und der kontrollierte Vergleich ihrer beiden Modellmodi. v1.3 wurde durch den Agenten noch nicht in TradingView kompiliert oder ausgeführt. Mark Price, Funding und tatsächliche Liquidationsdaten sind noch nicht integriert.
+## Änderungsverfolgung
 
-OI-Zuwachs und Footprint-Delta belegen keine einzelne Position, keinen tatsächlichen Hebel und keine zukünftige Liquidation. Footprint-Buy/Sell beruht auf TradingViews Volumenklassifikation. Die Ähnlichkeit mit Hyblock ist noch nicht quantitativ validiert.
+Ab sofort wird vor einer fachlichen Änderung ein GitHub-Issue angelegt oder weitergeführt. Commit, Akzeptanz und Prüfung werden verknüpft. Frühere Arbeit ist ausdrücklich als Nachtrag dokumentiert. Der Ablauf steht in [AGENTS.md](AGENTS.md).
+
+- [Tickets](https://github.com/alsuffndruff/hyblock-liquidation-levels/issues)
+- [Aktuelle Anzeige in TradingView prüfen (#4)](https://github.com/alsuffndruff/hyblock-liquidation-levels/issues/4)
+- [Preisabdeckung bei ähnlicher Levelanzahl verbessern (#5)](https://github.com/alsuffndruff/hyblock-liquidation-levels/issues/5)
+
+## Historische Versionen
+
+- [v1.7 – Zeitrahmenerweiterung](versions/cws-liquidation-levels-v1.7-multi-timeframe.pine)
+- [v1.6.3 – Nur Skalenlabels](versions/cws-liquidation-levels-v1.6.3-scale-only.pine)
+- [v1.6.2 – Skalenlabels und Vorgaben](versions/cws-liquidation-levels-v1.6.2-price-scale.pine)
+- [v1.6.1 – Einheitliche Linienbreite](versions/cws-liquidation-levels-v1.6.1-uniform-lines.pine)
+- [v1.6 – Reduzierte Leveldichte](versions/cws-liquidation-levels-v1.6-density-test.pine)
+- [v1.5 – Kalibrierungsversuch](versions/cws-liquidation-levels-v1.5-experimental.pine)
+- [v1.4 – TV-Rekonstruktion](versions/cws-liquidation-levels-v1.4.pine), [Export-Testfassung](versions/cws-liquidation-levels-v1.4-test.pine)
+- [v1.3 – Früheres Footprint-Experiment](cws-liquidation-levels-v1.3-experimental.pine), [Anleitung](cws-v1.3-anleitung.md)
+- [OI-/Footprint-Datentest v0.1](cws-oi-footprint-diagnostic-v0.1.pine), [Anleitung](cws-datentest-anleitung.md): historischer separater Versuch mit zusätzlichen TradingView-Datenanforderungen; keine Voraussetzung für die aktuelle freie Variante.
+- [v1.2 – Referenzfassung](cws-liquidation-levels-v1.2-original.pine)
+
+## Modellgrenzen
+
+OI-Zuwachs und geschätztes Delta belegen keine einzelne Position, keinen tatsächlichen Hebel und keine künftige Liquidation. Die Hebel- und Margin-Annahmen sind Szenarien. Eine ähnliche Anzahl sichtbarer Linien beweist keine gleiche Preisabdeckung. Screenshots liefern keine vollständige Referenzhistorie. Roh-CSV, Nutzerbilder und lokale Benutzerpfade werden nicht veröffentlicht.
