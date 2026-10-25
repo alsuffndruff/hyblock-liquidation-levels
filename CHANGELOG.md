@@ -4,6 +4,14 @@
 
 Die Einträge bis einschließlich v1.6.2 dokumentieren nachträglich Arbeit aus dem Chat. Sie sind keine Behauptung, dass diese Fassungen bereits zuvor im Repository lagen.
 
+### v1.10 CLUSTER EXPERIMENT – ausschließlich experiment/oi-cluster-selection (#5)
+
+- Kausale OI-Gruppen, gewichteter oder stärkster Einstieg und gruppenweiser Scorefilter. Bestehende Level bleiben unverändert; keine Rückdatierung.
+- Separate Chart-/Exportdateien mit zusätzlichem Gruppenexport; generische Referenzengine und synthetische Tests zu Zukunftsdaten, Datenlücken und Historienerhalt.
+- Kein Nachweis höherer Preisabdeckung durch diese Veröffentlichung. Private CSV-basierte Vergleiche bleiben lokal bis zur ausdrücklichen Veröffentlichungsfreigabe.
+- Compiler-/Laufzeitprüfung offen #4, Forschung #5 offen. Hauptversion v1.9 unverändert.
+- Nutzerwunsch: eigene Branches für Experimente; aktuellen Änderungsbranch immer nennen.
+
 ### v1.9 – Gleiche Legendenbreite und passende Skalenfarben (#14, #15)
 
 - Long-/Short-Hälfte aus derselben expliziten Breite ableiten; Farbmuster und Werte besitzen identische Spaltenbreiten. Breite je Hälfte in Appearance einstellbar.

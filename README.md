@@ -2,7 +2,15 @@
 
 Experimentelle Pine-v6-Indikatoren zur Untersuchung OI-basierter Liquidationsszenarien auf `BINANCE:BTCUSDT.P`. Die aktuelle Variante verwendet kostenlose Kurs-/OI-Daten und preisbasierte Delta-Schätzungen. Sie ist kein originalgetreuer Nachbau von Hyblock.
 
-## Aktuelle Version: v1.9
+## Branch-Experiment: OI-Gruppierung v1.10
+
+Aktueller Änderungsbranch: `experiment/oi-cluster-selection`, Forschung [#5](https://github.com/alsuffndruff/hyblock-liquidation-levels/issues/5). Keine Übernahme nach main. Quellcode und synthetische Tests sind bereitgestellt; CSV-basierte Messberichte bleiben bis zur ausdrücklichen Veröffentlichungsfreigabe lokal.
+
+- [Algorithmus, Installation und Grenzen](docs/oi-cluster-experiment.md)
+- [Cluster-Chartfassung](cws-liquidation-levels-v1.10-cluster-chart.pine), [Cluster-Exportfassung](cws-liquidation-levels-v1.10-cluster-export.pine)
+- Synthetische Prüfungen: `node experiments/oi-cluster/test.cjs`
+
+## Bisherige Hauptversion: v1.9
 
 - [Pine-Chartfassung v1.9](cws-liquidation-levels-v1.9-chart.pine): bis zu 32 gemeinsame, passend gefärbte Skalenplätze.
 - [Pine-Exportfassung v1.9](cws-liquidation-levels-v1.9-export.pine): vollständige bisherige CSV-Datenserien und bis zu 22 gemeinsame Farbplätze. Bei Bedarf statt der Chartfassung verwenden, nicht zusätzlich.
